@@ -11,6 +11,8 @@
 [HashiCorp Vault](../../deploy/vault/README.md), а не в коде или публичных
 конфигурационных файлах.
 
+Object storage изолируется через [S3-слой](s3-storage.md).
+
 ### 1. Реализовать ядро сервиса и REST API
 
 - Создать HTTP-сервер на Go
