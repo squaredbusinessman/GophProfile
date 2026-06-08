@@ -45,7 +45,7 @@ func (r *AvatarRepository) CreateAvatar(ctx context.Context, item avatar.Avatar)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 	`,
 		item.ID,
-		item.UserID,
+		item.UserEmail,
 		item.FileName,
 		item.MimeType,
 		item.SizeBytes,
@@ -97,8 +97,8 @@ func (r *AvatarRepository) GetAvatar(ctx context.Context, id string) (avatar.Ava
 	return item, nil
 }
 
-// ListAvatarsByUser возвращает активные avatar пользователя
-func (r *AvatarRepository) ListAvatarsByUser(ctx context.Context, userID string, limit int, offset int) ([]avatar.Avatar, error) {
+// ListAvatarsByUserEmail возвращает активные avatar пользователя по email
+func (r *AvatarRepository) ListAvatarsByUserEmail(ctx context.Context, userEmail string, limit int, offset int) ([]avatar.Avatar, error) {
 	if limit <= 0 {
 		limit = 50
 	}
@@ -127,7 +127,7 @@ func (r *AvatarRepository) ListAvatarsByUser(ctx context.Context, userID string,
 			AND deleted_at IS NULL
 		ORDER BY created_at DESC
 		LIMIT $2 OFFSET $3
-	`, userID, limit, offset)
+	`, userEmail, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("list avatars by user: %w", err)
 	}
@@ -188,8 +188,8 @@ func (r *AvatarRepository) MarkAvatarReady(ctx context.Context, id string, width
 	return expectOneAffected(result)
 }
 
-// SoftDeleteAvatar выполняет мягкое удаление avatar пользователя
-func (r *AvatarRepository) SoftDeleteAvatar(ctx context.Context, id string, userID string, deletedAt time.Time) error {
+// SoftDeleteAvatar выполняет мягкое удаление avatar пользователя по email
+func (r *AvatarRepository) SoftDeleteAvatar(ctx context.Context, id string, userEmail string, deletedAt time.Time) error {
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE avatars
 		SET status = $3,
@@ -198,7 +198,7 @@ func (r *AvatarRepository) SoftDeleteAvatar(ctx context.Context, id string, user
 		WHERE id = $1
 			AND user_id = $2
 			AND deleted_at IS NULL
-	`, id, userID, string(avatar.StatusDeleting), deletedAt)
+	`, id, userEmail, string(avatar.StatusDeleting), deletedAt)
 	if err != nil {
 		return fmt.Errorf("soft delete avatar: %w", err)
 	}
@@ -238,7 +238,7 @@ func scanAvatar(scanner avatarScanner) (avatar.Avatar, error) {
 
 	err := scanner.Scan(
 		&item.ID,
-		&item.UserID,
+		&item.UserEmail,
 		&item.FileName,
 		&item.MimeType,
 		&item.SizeBytes,

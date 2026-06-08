@@ -14,23 +14,31 @@ import (
 
 // TestObjectKeyBuilders проверяет формат S3 object keys
 func TestObjectKeyBuilders(t *testing.T) {
-	userID := "/user-1/"
+	userEmail := "/User+Avatar@Example.COM/"
 	avatarID := "/avatar-1/"
 
 	tests := map[string]string{
-		"original": OriginalObjectKey(userID, avatarID),
-		"100x100":  Thumb100ObjectKey(userID, avatarID),
-		"300x300":  Thumb300ObjectKey(userID, avatarID),
+		"original": OriginalObjectKey(userEmail, avatarID),
+		"100x100":  Thumb100ObjectKey(userEmail, avatarID),
+		"300x300":  Thumb300ObjectKey(userEmail, avatarID),
 	}
 
-	if tests["original"] != "avatars/user-1/avatar-1/original" {
+	if tests["original"] != "avatars/User+Avatar@Example.COM/avatar-1/original" {
 		t.Fatalf("original key = %q", tests["original"])
 	}
-	if tests["100x100"] != "avatars/user-1/avatar-1/100x100" {
+	if tests["100x100"] != "avatars/User+Avatar@Example.COM/avatar-1/100x100" {
 		t.Fatalf("100x100 key = %q", tests["100x100"])
 	}
-	if tests["300x300"] != "avatars/user-1/avatar-1/300x300" {
+	if tests["300x300"] != "avatars/User+Avatar@Example.COM/avatar-1/300x300" {
 		t.Fatalf("300x300 key = %q", tests["300x300"])
+	}
+}
+
+// TestObjectKeyBuildersEscapeUnsafeSegments проверяет экранирование path-сегментов
+func TestObjectKeyBuildersEscapeUnsafeSegments(t *testing.T) {
+	key := OriginalObjectKey("user/name@example.com", "avatar/1")
+	if key != "avatars/user%2Fname@example.com/avatar%2F1/original" {
+		t.Fatalf("key = %q, want escaped segments", key)
 	}
 }
 

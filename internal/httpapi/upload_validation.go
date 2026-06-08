@@ -1,0 +1,247 @@
+package httpapi
+
+import (
+	"errors"
+	"fmt"
+	"io"
+	"mime"
+	"mime/multipart"
+	"net/http"
+	"net/mail"
+	"strings"
+)
+
+const (
+	MaxAvatarFileSize       int64 = 10 * 1024 * 1024
+	avatarUploadMemoryLimit int64 = 1 * 1024 * 1024
+	avatarUploadBodyLimit   int64 = MaxAvatarFileSize + avatarUploadMemoryLimit
+	maxUserEmailLength            = 254
+)
+
+type ValidatedAvatarUpload struct {
+	UserEmail   string
+	FileName    string
+	ContentType string
+	Size        int64
+	FileHeader  *multipart.FileHeader
+	form        *multipart.Form
+}
+
+type ValidationError struct {
+	StatusCode int    `json:"-"`
+	Message    string `json:"error"`
+	Details    string `json:"details,omitempty"`
+}
+
+// Error возвращает человекочитаемое описание ошибки валидации
+func (e *ValidationError) Error() string {
+	if e.Details == "" {
+		return e.Message
+	}
+	return e.Message + ": " + e.Details
+}
+
+// Open открывает валидированный multipart file для дальнейшего чтения
+func (u *ValidatedAvatarUpload) Open() (multipart.File, error) {
+	return u.FileHeader.Open()
+}
+
+// Close удаляет временные файлы multipart form
+func (u *ValidatedAvatarUpload) Close() error {
+	if u.form == nil {
+		return nil
+	}
+	return u.form.RemoveAll()
+}
+
+// ValidateAvatarUploadRequest проверяет запрос загрузки avatar до обращения к S3
+func ValidateAvatarUploadRequest(w http.ResponseWriter, req *http.Request) (*ValidatedAvatarUpload, error) {
+	userEmail, err := validateUserEmail(req.Header.Get("X-User-ID"))
+	if err != nil {
+		return nil, err
+	}
+
+	req.Body = http.MaxBytesReader(w, req.Body, avatarUploadBodyLimit)
+	if err := req.ParseMultipartForm(avatarUploadMemoryLimit); err != nil {
+		return nil, parseMultipartError(err)
+	}
+
+	fileHeader, err := requiredFileHeader(req.MultipartForm)
+	if err != nil {
+		return nil, err
+	}
+	if fileHeader.Size > MaxAvatarFileSize {
+		return nil, fileTooLargeError()
+	}
+
+	contentType, err := normalizeContentType(fileHeader.Header.Get("Content-Type"))
+	if err != nil {
+		return nil, err
+	}
+
+	file, err := fileHeader.Open()
+	if err != nil {
+		return nil, validationError(http.StatusBadRequest, "Invalid file", "Cannot open uploaded file")
+	}
+	defer file.Close()
+
+	magicContentType, err := detectImageContentType(file)
+	if err != nil {
+		return nil, err
+	}
+	if magicContentType != contentType {
+		return nil, validationError(http.StatusBadRequest, "Invalid file format", "MIME type does not match file content")
+	}
+
+	return &ValidatedAvatarUpload{
+		UserEmail:   userEmail,
+		FileName:    fileHeader.Filename,
+		ContentType: contentType,
+		Size:        fileHeader.Size,
+		FileHeader:  fileHeader,
+		form:        req.MultipartForm,
+	}, nil
+}
+
+// validateUserEmail проверяет что X-User-ID содержит email пользователя
+func validateUserEmail(rawUserEmail string) (string, error) {
+	userEmail := strings.ToLower(strings.TrimSpace(rawUserEmail))
+	if userEmail == "" {
+		return "", validationError(http.StatusBadRequest, "Missing X-User-ID", "Header X-User-ID with user email is required")
+	}
+	if len(userEmail) > maxUserEmailLength {
+		return "", validationError(http.StatusBadRequest, "Invalid X-User-ID", "Email is too long")
+	}
+	if strings.ContainsAny(userEmail, " \t\r\n") {
+		return "", validationError(http.StatusBadRequest, "Invalid X-User-ID", "Header X-User-ID must contain a single email")
+	}
+
+	address, err := mail.ParseAddress(userEmail)
+	if err != nil || address.Address != userEmail {
+		return "", validationError(http.StatusBadRequest, "Invalid X-User-ID", "Header X-User-ID must contain a valid email")
+	}
+
+	local, domain, ok := strings.Cut(userEmail, "@")
+	if !ok || local == "" || domain == "" || !strings.Contains(domain, ".") {
+		return "", validationError(http.StatusBadRequest, "Invalid X-User-ID", "Header X-User-ID must contain a valid email")
+	}
+	if strings.HasPrefix(domain, ".") || strings.HasSuffix(domain, ".") || strings.Contains(domain, "..") {
+		return "", validationError(http.StatusBadRequest, "Invalid X-User-ID", "Header X-User-ID must contain a valid email")
+	}
+
+	return userEmail, nil
+}
+
+// parseMultipartError мапит ошибку multipart parsing в ошибку API
+func parseMultipartError(err error) error {
+	var maxBytesError *http.MaxBytesError
+	if errors.As(err, &maxBytesError) {
+		return fileTooLargeError()
+	}
+	return validationError(http.StatusBadRequest, "Invalid multipart form", "Request must include multipart field file")
+}
+
+// requiredFileHeader возвращает обязательный multipart file header
+func requiredFileHeader(form *multipart.Form) (*multipart.FileHeader, error) {
+	if form == nil || form.File == nil {
+		return nil, validationError(http.StatusBadRequest, "Missing file", "Multipart field file is required")
+	}
+
+	files := form.File["file"]
+	if len(files) == 0 {
+		return nil, validationError(http.StatusBadRequest, "Missing file", "Multipart field file is required")
+	}
+
+	fileHeader := files[0]
+	if fileHeader.Size == 0 {
+		return nil, validationError(http.StatusBadRequest, "Invalid file format", "File is empty")
+	}
+	return fileHeader, nil
+}
+
+// normalizeContentType проверяет и нормализует Content-Type multipart file
+func normalizeContentType(rawContentType string) (string, error) {
+	contentType := strings.TrimSpace(strings.ToLower(rawContentType))
+	if contentType == "" {
+		return "", validationError(http.StatusBadRequest, "Invalid file format", "Missing file Content-Type")
+	}
+
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return "", validationError(http.StatusBadRequest, "Invalid file format", "Invalid file Content-Type")
+	}
+	if !isAllowedImageContentType(mediaType) {
+		return "", validationError(http.StatusBadRequest, "Invalid file format", "Supported formats: jpeg, png, webp")
+	}
+	return mediaType, nil
+}
+
+// detectImageContentType определяет MIME-тип по magic bytes
+func detectImageContentType(reader io.Reader) (string, error) {
+	buffer := make([]byte, 512)
+	n, err := io.ReadFull(reader, buffer)
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
+		return "", validationError(http.StatusBadRequest, "Invalid file format", "Cannot read file header")
+	}
+	if n == 0 {
+		return "", validationError(http.StatusBadRequest, "Invalid file format", "File is empty")
+	}
+
+	contentType := detectMagicContentType(buffer[:n])
+	if contentType == "" {
+		return "", validationError(http.StatusBadRequest, "Invalid file format", "Supported formats: jpeg, png, webp")
+	}
+	return contentType, nil
+}
+
+// detectMagicContentType распознает JPEG PNG и WebP по magic bytes
+func detectMagicContentType(data []byte) string {
+	if len(data) >= 3 && data[0] == 0xff && data[1] == 0xd8 && data[2] == 0xff {
+		return "image/jpeg"
+	}
+	if len(data) >= 8 &&
+		data[0] == 0x89 &&
+		data[1] == 'P' &&
+		data[2] == 'N' &&
+		data[3] == 'G' &&
+		data[4] == '\r' &&
+		data[5] == '\n' &&
+		data[6] == 0x1a &&
+		data[7] == '\n' {
+		return "image/png"
+	}
+	if len(data) >= 12 &&
+		string(data[0:4]) == "RIFF" &&
+		string(data[8:12]) == "WEBP" {
+		return "image/webp"
+	}
+	return ""
+}
+
+// isAllowedImageContentType проверяет разрешенный MIME-тип изображения
+func isAllowedImageContentType(contentType string) bool {
+	switch contentType {
+	case "image/jpeg", "image/png", "image/webp":
+		return true
+	default:
+		return false
+	}
+}
+
+// fileTooLargeError возвращает ошибку превышения размера файла
+func fileTooLargeError() error {
+	return &ValidationError{
+		StatusCode: http.StatusRequestEntityTooLarge,
+		Message:    "File too large",
+		Details:    fmt.Sprintf("Max size is %d bytes", MaxAvatarFileSize),
+	}
+}
+
+// validationError создает ошибку валидации для HTTP-ответа
+func validationError(statusCode int, message string, details string) error {
+	return &ValidationError{
+		StatusCode: statusCode,
+		Message:    message,
+		Details:    details,
+	}
+}

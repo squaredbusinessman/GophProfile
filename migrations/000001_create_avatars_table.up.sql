@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS avatars (
 
 COMMENT ON TABLE avatars IS 'Аватарки пользователей и состояние обработки файлов';
 COMMENT ON COLUMN avatars.id IS 'Уникальный идентификатор аватарки';
-COMMENT ON COLUMN avatars.user_id IS 'Внешний идентификатор владельца аватарки';
+COMMENT ON COLUMN avatars.user_id IS 'Email владельца аватарки из X-User-ID';
 COMMENT ON COLUMN avatars.file_name IS 'Исходное имя загруженного файла';
 COMMENT ON COLUMN avatars.mime_type IS 'Проверенный MIME-тип изображения';
 COMMENT ON COLUMN avatars.size_bytes IS 'Размер оригинального файла в байтах';

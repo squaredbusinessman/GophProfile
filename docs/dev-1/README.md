@@ -13,6 +13,8 @@
 
 Object storage изолируется через [S3-слой](s3-storage.md).
 
+Загрузка avatar проверяется через [валидацию upload request](upload-validation.md).
+
 ### 1. Реализовать ядро сервиса и REST API
 
 - Создать HTTP-сервер на Go
@@ -52,7 +54,7 @@ Object storage изолируется через [S3-слой](s3-storage.md).
 - Ограничить размер файлов
 - Добавить rate limiting для API
 - Настроить CORS
-- Валидировать `User-ID` из заголовков
+- Валидировать email пользователя из `X-User-ID`
 
 ## API
 
@@ -61,7 +63,7 @@ Object storage изолируется через [S3-слой](s3-storage.md).
 ```http
 POST /api/v1/avatars
 Content-Type: multipart/form-data
-X-User-ID: string
+X-User-ID: email
 ```
 
 Поля запроса:
@@ -72,7 +74,7 @@ file: binary
 
 Ограничения:
 
-- `X-User-ID` обязателен
+- `X-User-ID` обязателен и должен содержать email пользователя
 - `file` обязателен
 - Максимальный размер файла `10MB`
 - Форматы `JPEG`, `PNG`, `WebP` опционально
@@ -84,7 +86,7 @@ file: binary
 ```json
 {
   "id": "uuid",
-  "user_id": "string",
+  "user_id": "user@example.com",
   "url": "string",
   "status": "processing",
   "created_at": "2024-01-01T00:00:00Z"
@@ -113,7 +115,7 @@ file: binary
 
 ```http
 GET /api/v1/avatars/{avatar_id}
-GET /api/v1/users/{user_id}/avatar
+GET /api/v1/users/{user_email}/avatar
 ```
 
 Query-параметры опционально:
@@ -155,13 +157,13 @@ ETag: "hash"
 
 ```http
 DELETE /api/v1/avatars/{avatar_id}
-DELETE /api/v1/users/{user_id}/avatar
-X-User-ID: string
+DELETE /api/v1/users/{user_email}/avatar
+X-User-ID: email
 ```
 
 Требования:
 
-- `X-User-ID` обязателен
+- `X-User-ID` обязателен и должен содержать email пользователя
 - Мягкое удаление в БД
 - Асинхронное удаление из S3
 - Удалять можно только свои аватарки
@@ -192,7 +194,7 @@ GET /api/v1/avatars/{avatar_id}/metadata
 ```json
 {
   "id": "uuid",
-  "user_id": "string",
+  "user_id": "user@example.com",
   "file_name": "avatar.jpg",
   "mime_type": "image/jpeg",
   "size": 1024000,
@@ -218,7 +220,7 @@ GET /api/v1/avatars/{avatar_id}/metadata
 ### Список аватарок пользователя
 
 ```http
-GET /api/v1/users/{user_id}/avatars
+GET /api/v1/users/{user_email}/avatars
 ```
 
 ### Проверка работоспособности
@@ -240,7 +242,7 @@ Healthcheck должен проверять:
 ```http
 GET  /web/upload
 POST /web/upload
-GET  /web/gallery/{user_id}
+GET  /web/gallery/{user_email}
 ```
 
 Веб-интерфейс должен включать:
@@ -339,9 +341,9 @@ CREATE INDEX idx_avatars_status ON avatars(upload_status, processing_status);
 
 ```go
 type AvatarUploadEvent struct {
-    AvatarID string `json:"avatar_id"`
-    UserID   string `json:"user_id"`
-    S3Key    string `json:"s3_key"`
+    AvatarID  string `json:"avatar_id"`
+    UserEmail string `json:"user_id"`
+    S3Key     string `json:"s3_key"`
 }
 
 type AvatarProcessEvent struct {

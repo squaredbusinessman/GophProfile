@@ -22,7 +22,7 @@ const (
 
 type Avatar struct {
 	ID                string
-	UserID            string
+	UserEmail         string
 	FileName          string
 	MimeType          string
 	SizeBytes         int64

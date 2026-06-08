@@ -18,9 +18,17 @@ type Store interface {
 
 ## Object keys
 
-- Оригинал: `avatars/{user_id}/{avatar_id}/original`
-- Миниатюра 100x100: `avatars/{user_id}/{avatar_id}/100x100`
-- Миниатюра 300x300: `avatars/{user_id}/{avatar_id}/300x300`
+- Оригинал: `avatars/{user_email}/{avatar_id}/original`
+- Миниатюра 100x100: `avatars/{user_email}/{avatar_id}/100x100`
+- Миниатюра 300x300: `avatars/{user_email}/{avatar_id}/300x300`
+
+В текущей продуктовой модели `user_id` в БД и API является нормализованным email
+пользователя из header `X-User-ID`. В object key используем имя сегмента
+`user_email`, чтобы не путать его с внутренним числовым идентификатором.
+
+Перед попаданием в object key email проходит path escaping как отдельный сегмент
+пути. Это защищает структуру ключей от символов, которые могут трактоваться как
+разделители пути.
 
 Для создания ключей использовать функции:
 
