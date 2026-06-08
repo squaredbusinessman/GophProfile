@@ -7,7 +7,7 @@ document.querySelector('#app').innerHTML = `
   <div class="page">
     <header class="header">
       <div>
-        <p class="eyebrow">GophProfile MVP</p>
+        <p class="eyebrow">GophProfile</p>
         <h1 class="title">Управление аватарками</h1>
         <p class="subtitle">Загрузите изображение, проверьте ответ API и посмотрите галерею пользователя</p>
       </div>

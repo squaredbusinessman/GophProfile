@@ -50,6 +50,9 @@ tmp/
 temp/
 .cache/
 
+# Локальные рабочие материалы по ТЗ
+docs/.tz-work/
+
 # Локальные runtime-данные Docker
 docker-data/
 *.pid
