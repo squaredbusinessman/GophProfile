@@ -61,3 +61,32 @@ func TestLoadReadsEnvironment(t *testing.T) {
 		t.Fatalf("Kafka.Brokers = %#v, want two configured brokers", cfg.Kafka.Brokers)
 	}
 }
+
+// TestApplySecretsOverridesSensitiveConfig проверяет применение секретов к конфигу
+func TestApplySecretsOverridesSensitiveConfig(t *testing.T) {
+	cfg := Load()
+
+	cfg.ApplySecrets(map[string]string{
+		"DATABASE_URL":         "postgres://from-vault",
+		"S3_ACCESS_KEY":        "vault-access-key",
+		"S3_SECRET_KEY":        "vault-secret-key",
+		"KAFKA_BROKERS":        "kafka-1:9092,kafka-2:9092",
+		"KAFKA_CONSUMER_GROUP": "vault-group",
+	})
+
+	if cfg.Postgres.DSN != "postgres://from-vault" {
+		t.Fatalf("Postgres.DSN = %q, want vault value", cfg.Postgres.DSN)
+	}
+	if cfg.S3.AccessKey != "vault-access-key" {
+		t.Fatalf("S3.AccessKey = %q, want vault value", cfg.S3.AccessKey)
+	}
+	if cfg.S3.SecretKey != "vault-secret-key" {
+		t.Fatalf("S3.SecretKey = %q, want vault value", cfg.S3.SecretKey)
+	}
+	if !reflect.DeepEqual(cfg.Kafka.Brokers, []string{"kafka-1:9092", "kafka-2:9092"}) {
+		t.Fatalf("Kafka.Brokers = %#v, want vault brokers", cfg.Kafka.Brokers)
+	}
+	if cfg.Kafka.ConsumerGroup != "vault-group" {
+		t.Fatalf("Kafka.ConsumerGroup = %q, want vault-group", cfg.Kafka.ConsumerGroup)
+	}
+}

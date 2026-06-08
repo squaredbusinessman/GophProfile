@@ -1,22 +1,25 @@
 package postgres
 
-import "context"
+import (
+	"context"
+	"database/sql"
+)
 
 type Client struct {
-	dsn string
+	db *sql.DB
 }
 
-// NewClient создает заготовку PostgreSQL client
-func NewClient(dsn string) *Client {
-	return &Client{dsn: dsn}
+// NewClient создает PostgreSQL client поверх открытого DB connection pool
+func NewClient(db *sql.DB) *Client {
+	return &Client{db: db}
 }
 
 // HealthCheck проверяет доступность PostgreSQL client
 func (c *Client) HealthCheck(ctx context.Context) error {
-	return ctx.Err()
+	return c.db.PingContext(ctx)
 }
 
-// DSN возвращает строку подключения PostgreSQL
-func (c *Client) DSN() string {
-	return c.dsn
+// DB возвращает открытый PostgreSQL connection pool
+func (c *Client) DB() *sql.DB {
+	return c.db
 }

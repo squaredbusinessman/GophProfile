@@ -24,6 +24,7 @@ type Config struct {
 	S3          S3Config
 	Kafka       KafkaConfig
 	Worker      WorkerConfig
+	Vault       VaultConfig
 }
 
 type HTTPConfig struct {
@@ -55,6 +56,46 @@ type KafkaConfig struct {
 
 type WorkerConfig struct {
 	ShutdownTimeout time.Duration
+}
+
+type VaultConfig struct {
+	Addr        string
+	Token       string
+	Mount       string
+	ServicePath string
+	Enabled     bool
+	Timeout     time.Duration
+}
+
+// ApplySecrets применяет секреты из защищенного хранилища к конфигурации
+func (c *Config) ApplySecrets(secrets map[string]string) {
+	if value := strings.TrimSpace(secrets["DATABASE_URL"]); value != "" {
+		c.Postgres.DSN = value
+	}
+	if value := strings.TrimSpace(secrets["S3_ENDPOINT"]); value != "" {
+		c.S3.Endpoint = value
+	}
+	if value := strings.TrimSpace(secrets["S3_BUCKET"]); value != "" {
+		c.S3.Bucket = value
+	}
+	if value := strings.TrimSpace(secrets["S3_ACCESS_KEY"]); value != "" {
+		c.S3.AccessKey = value
+	}
+	if value := strings.TrimSpace(secrets["S3_SECRET_KEY"]); value != "" {
+		c.S3.SecretKey = value
+	}
+	if value := strings.TrimSpace(secrets["S3_REGION"]); value != "" {
+		c.S3.Region = value
+	}
+	if value := strings.TrimSpace(secrets["KAFKA_BROKERS"]); value != "" {
+		c.Kafka.Brokers = splitCSV(value)
+	}
+	if value := strings.TrimSpace(secrets["KAFKA_CLIENT_ID"]); value != "" {
+		c.Kafka.ClientID = value
+	}
+	if value := strings.TrimSpace(secrets["KAFKA_CONSUMER_GROUP"]); value != "" {
+		c.Kafka.ConsumerGroup = value
+	}
 }
 
 // Load читает конфигурацию приложения из переменных окружения
@@ -89,6 +130,14 @@ func Load() Config {
 		},
 		Worker: WorkerConfig{
 			ShutdownTimeout: envDuration("WORKER_SHUTDOWN_TIMEOUT", 10*time.Second),
+		},
+		Vault: VaultConfig{
+			Addr:        envString("VAULT_ADDR", "http://localhost:8200"),
+			Token:       envString("VAULT_TOKEN", ""),
+			Mount:       envString("VAULT_KV_MOUNT", "secret"),
+			ServicePath: envString("VAULT_SERVICE_PATH", "gophprofile"),
+			Enabled:     envBool("VAULT_ENABLED", false),
+			Timeout:     envDuration("VAULT_TIMEOUT", 5*time.Second),
 		},
 	}
 }
@@ -137,6 +186,15 @@ func envCSV(key string, fallback []string) []string {
 		return fallback
 	}
 
+	items := splitCSV(value)
+	if len(items) == 0 {
+		return fallback
+	}
+	return items
+}
+
+// splitCSV разбирает CSV-строку без пустых значений
+func splitCSV(value string) []string {
 	parts := strings.Split(value, ",")
 	items := make([]string, 0, len(parts))
 	for _, part := range parts {
@@ -144,9 +202,6 @@ func envCSV(key string, fallback []string) []string {
 		if item != "" {
 			items = append(items, item)
 		}
-	}
-	if len(items) == 0 {
-		return fallback
 	}
 	return items
 }

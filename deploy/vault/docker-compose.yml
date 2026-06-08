@@ -1,0 +1,33 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: vault
+      POSTGRES_USER: vault
+      POSTGRES_PASSWORD: vault
+    ports:
+      - "5433:5432"
+    volumes:
+      - vault-postgres-data:/var/lib/postgresql/data
+      - ./postgresql-storage-schema.sql:/docker-entrypoint-initdb.d/001-vault-storage.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vault -d vault"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  vault:
+    image: hashicorp/vault:1.21
+    command: server -config=/vault/config/vault.hcl
+    cap_add:
+      - IPC_LOCK
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8200:8200"
+    volumes:
+      - ./vault.hcl:/vault/config/vault.hcl:ro
+
+volumes:
+  vault-postgres-data:

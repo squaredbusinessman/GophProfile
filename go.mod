@@ -2,7 +2,10 @@ module github.com/squaredbusinessman/GophProfile
 
 go 1.26.3
 
-require github.com/rs/zerolog v1.35.1
+require (
+	github.com/DATA-DOG/go-sqlmock v1.5.2
+	github.com/rs/zerolog v1.35.1
+)
 
 require (
 	github.com/mattn/go-colorable v0.1.14 // indirect
