@@ -1,0 +1,50 @@
+# Метаданные ОС
+.DS_Store
+Thumbs.db
+
+# Настройки IDE и редакторов
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Окружение и локальная конфигурация
+.env
+.env.*
+!.env.example
+*.local
+
+# Артефакты сборки Go
+bin/
+build/
+dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Покрытие тестов и профилирование Go
+coverage.out
+coverage.html
+*.coverprofile
+*.prof
+*.pprof
+
+# Workspace и vendor-зависимости Go
+vendor/
+go.work
+go.work.sum
+
+# Логи и временные файлы
+*.log
+tmp/
+temp/
+.cache/
+
+# Локальные runtime-данные Docker
+docker-data/
+*.pid
