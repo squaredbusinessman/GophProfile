@@ -10,20 +10,20 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/squaredbusinessman/GophProfile/internal/domain/avatar"
+	"github.com/squaredbusinessman/GophProfile/internal/domain/outbox"
 	"github.com/squaredbusinessman/GophProfile/internal/domain/user"
 	queuekafka "github.com/squaredbusinessman/GophProfile/internal/queue/kafka"
 	storages3 "github.com/squaredbusinessman/GophProfile/internal/storage/s3"
 )
 
-const avatarPublishAttempts = 3
-
 type UserResolver interface {
 	FindOrCreateUserByEmail(ctx context.Context, email string, now time.Time) (user.User, error)
 }
 
-type AvatarStore interface {
-	CreateAvatar(ctx context.Context, item avatar.Avatar) error
-	UpdateAvatarStatus(ctx context.Context, id string, status avatar.Status, updatedAt time.Time) error
+type AvatarOutboxStore interface {
+	CreateAvatarWithOutbox(ctx context.Context, item avatar.Avatar, event outbox.Event) error
+	MarkOutboxPublished(ctx context.Context, id string, publishedAt time.Time) error
+	MarkOutboxPublishAttemptFailed(ctx context.Context, id string, publishErr error, updatedAt time.Time) error
 }
 
 type ObjectStore interface {
@@ -35,11 +35,11 @@ type EventPublisher interface {
 }
 
 type AvatarUploadService struct {
-	users     UserResolver
-	avatars   AvatarStore
-	objects   ObjectStore
-	publisher EventPublisher
-	now       func() time.Time
+	users        UserResolver
+	avatarOutbox AvatarOutboxStore
+	objects      ObjectStore
+	publisher    EventPublisher
+	now          func() time.Time
 }
 
 type AvatarUploadRequest struct {
@@ -77,19 +77,19 @@ type AvatarProcessEvent struct {
 }
 
 // NewAvatarUploadService создает service загрузки avatar
-func NewAvatarUploadService(users UserResolver, avatars AvatarStore, objects ObjectStore, publisher EventPublisher) *AvatarUploadService {
+func NewAvatarUploadService(users UserResolver, avatarOutbox AvatarOutboxStore, objects ObjectStore, publisher EventPublisher) *AvatarUploadService {
 	return &AvatarUploadService{
-		users:     users,
-		avatars:   avatars,
-		objects:   objects,
-		publisher: publisher,
-		now:       time.Now,
+		users:        users,
+		avatarOutbox: avatarOutbox,
+		objects:      objects,
+		publisher:    publisher,
+		now:          time.Now,
 	}
 }
 
-// UploadAvatar сохраняет original в S3 создает запись в БД и публикует задачу обработки
+// UploadAvatar сохраняет original в S3 и атомарно создает avatar с outbox событием
 func (s *AvatarUploadService) UploadAvatar(ctx context.Context, req AvatarUploadRequest) (AvatarUploadResult, error) {
-	if s.users == nil || s.avatars == nil || s.objects == nil || s.publisher == nil {
+	if s.users == nil || s.avatarOutbox == nil || s.objects == nil || s.publisher == nil {
 		return AvatarUploadResult{}, fmt.Errorf("avatar upload service is not configured")
 	}
 
@@ -130,10 +130,6 @@ func (s *AvatarUploadService) UploadAvatar(ctx context.Context, req AvatarUpload
 		CreatedAt:         now,
 		UpdatedAt:         now,
 	}
-	if err := s.avatars.CreateAvatar(ctx, item); err != nil {
-		return AvatarUploadResult{}, fmt.Errorf("create avatar metadata: %w", err)
-	}
-
 	event := AvatarProcessEvent{
 		AvatarID:          avatarID,
 		UserID:            owner.ID,
@@ -143,10 +139,25 @@ func (s *AvatarUploadService) UploadAvatar(ctx context.Context, req AvatarUpload
 		Thumb300ObjectKey: thumb300Key,
 		ContentType:       req.ContentType,
 	}
-	if err := s.publishProcessEvent(ctx, event); err != nil {
-		_ = s.avatars.UpdateAvatarStatus(ctx, avatarID, avatar.StatusFailed, s.now().UTC())
-		return AvatarUploadResult{}, fmt.Errorf("publish avatar process event: %w", err)
+	payload, err := json.Marshal(event)
+	if err != nil {
+		return AvatarUploadResult{}, fmt.Errorf("marshal avatar process event: %w", err)
 	}
+
+	outboxEvent := outbox.Event{
+		ID:        uuid.NewString(),
+		Topic:     queuekafka.TopicAvatarProcess,
+		Key:       avatarID,
+		Payload:   payload,
+		Status:    outbox.StatusPending,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := s.avatarOutbox.CreateAvatarWithOutbox(ctx, item, outboxEvent); err != nil {
+		return AvatarUploadResult{}, fmt.Errorf("create avatar metadata and outbox event: %w", err)
+	}
+
+	s.publishOutboxEvent(ctx, outboxEvent)
 
 	return AvatarUploadResult{
 		ID:                avatarID,
@@ -163,22 +174,14 @@ func (s *AvatarUploadService) UploadAvatar(ctx context.Context, req AvatarUpload
 	}, nil
 }
 
-// publishProcessEvent публикует Kafka-событие с коротким retry для MVP
-func (s *AvatarUploadService) publishProcessEvent(ctx context.Context, event AvatarProcessEvent) error {
-	payload, err := json.Marshal(event)
-	if err != nil {
-		return err
+// publishOutboxEvent пытается быстро опубликовать outbox событие после commit
+func (s *AvatarUploadService) publishOutboxEvent(ctx context.Context, event outbox.Event) {
+	if err := s.publisher.Publish(ctx, event.Topic, event.Key, event.Payload); err != nil {
+		_ = s.avatarOutbox.MarkOutboxPublishAttemptFailed(ctx, event.ID, err, s.now().UTC())
+		return
 	}
 
-	var lastErr error
-	for attempt := 0; attempt < avatarPublishAttempts; attempt++ {
-		if err := s.publisher.Publish(ctx, queuekafka.TopicAvatarProcess, event.AvatarID, payload); err != nil {
-			lastErr = err
-			continue
-		}
-		return nil
-	}
-	return lastErr
+	_ = s.avatarOutbox.MarkOutboxPublished(ctx, event.ID, s.now().UTC())
 }
 
 // intPtr возвращает указатель на положительный int или nil

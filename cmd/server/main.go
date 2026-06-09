@@ -48,8 +48,8 @@ func main() {
 	defer kafkaClient.Close()
 
 	userRepo := postgres.NewUserRepository(db)
-	avatarRepo := postgres.NewAvatarRepository(db)
-	avatarUploadService := app.NewAvatarUploadService(userRepo, avatarRepo, s3Client, kafkaClient)
+	outboxRepo := postgres.NewOutboxRepository(db)
+	avatarUploadService := app.NewAvatarUploadService(userRepo, outboxRepo, s3Client, kafkaClient)
 
 	router := httpapi.NewRouter(httpapi.RouterConfig{
 		ServiceName:    cfg.ServiceName,

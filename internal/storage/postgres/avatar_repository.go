@@ -14,6 +14,10 @@ type AvatarRepository struct {
 	db *sql.DB
 }
 
+type sqlExecutor interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
 // NewAvatarRepository создает repository для работы с avatar в PostgreSQL
 func NewAvatarRepository(db *sql.DB) *AvatarRepository {
 	return &AvatarRepository{db: db}
@@ -21,11 +25,16 @@ func NewAvatarRepository(db *sql.DB) *AvatarRepository {
 
 // CreateAvatar сохраняет новую avatar со статусом processing
 func (r *AvatarRepository) CreateAvatar(ctx context.Context, item avatar.Avatar) error {
+	return insertAvatar(ctx, r.db, item)
+}
+
+// insertAvatar сохраняет avatar через указанный SQL executor
+func insertAvatar(ctx context.Context, executor sqlExecutor, item avatar.Avatar) error {
 	if err := avatar.ValidateStatus(item.Status); err != nil {
 		return err
 	}
 
-	_, err := r.db.ExecContext(ctx, `
+	_, err := executor.ExecContext(ctx, `
 		INSERT INTO avatars (
 			id,
 			user_id,

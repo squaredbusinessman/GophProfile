@@ -29,6 +29,12 @@ func TestLoadUsesLocalDefaults(t *testing.T) {
 	if !reflect.DeepEqual(cfg.Kafka.Brokers, []string{"localhost:9092"}) {
 		t.Fatalf("Kafka.Brokers = %#v, want localhost:9092", cfg.Kafka.Brokers)
 	}
+	if cfg.Worker.OutboxPollInterval != 5*time.Second {
+		t.Fatalf("Worker.OutboxPollInterval = %s, want 5s", cfg.Worker.OutboxPollInterval)
+	}
+	if cfg.Worker.OutboxBatchSize != 100 {
+		t.Fatalf("Worker.OutboxBatchSize = %d, want 100", cfg.Worker.OutboxBatchSize)
+	}
 }
 
 // TestLoadReadsEnvironment проверяет чтение конфигурации из env
@@ -39,6 +45,8 @@ func TestLoadReadsEnvironment(t *testing.T) {
 	t.Setenv("HTTP_READ_TIMEOUT", "3s")
 	t.Setenv("S3_USE_PATH_STYLE", "false")
 	t.Setenv("KAFKA_BROKERS", "localhost:19092, localhost:29092")
+	t.Setenv("OUTBOX_POLL_INTERVAL", "2s")
+	t.Setenv("OUTBOX_BATCH_SIZE", "25")
 
 	cfg := Load()
 
@@ -59,6 +67,12 @@ func TestLoadReadsEnvironment(t *testing.T) {
 	}
 	if !reflect.DeepEqual(cfg.Kafka.Brokers, []string{"localhost:19092", "localhost:29092"}) {
 		t.Fatalf("Kafka.Brokers = %#v, want two configured brokers", cfg.Kafka.Brokers)
+	}
+	if cfg.Worker.OutboxPollInterval != 2*time.Second {
+		t.Fatalf("Worker.OutboxPollInterval = %s, want 2s", cfg.Worker.OutboxPollInterval)
+	}
+	if cfg.Worker.OutboxBatchSize != 25 {
+		t.Fatalf("Worker.OutboxBatchSize = %d, want 25", cfg.Worker.OutboxBatchSize)
 	}
 }
 

@@ -38,6 +38,7 @@ Object storage изолируется через [S3-слой](s3-storage.md).
 - Создавать миниатюры `100x100` и `300x300`
 - Реализовать асинхронное удаление файлов из S3
 - Обеспечить идемпотентность обработки
+- Использовать transactional outbox для надежной публикации событий
 - Реализовать retry с экспоненциальным backoff
 - Для работы с Kafka использовать Confluent Kafka Go client
 
@@ -353,11 +354,39 @@ CREATE TABLE avatars (
 CREATE INDEX idx_avatars_user_id_created_at ON avatars(user_id, created_at DESC);
 CREATE INDEX idx_avatars_user_id_active ON avatars(user_id) WHERE deleted_at IS NULL;
 CREATE INDEX idx_avatars_status ON avatars(status);
+
+CREATE TABLE outbox_events (
+    id UUID PRIMARY KEY,
+    topic TEXT NOT NULL,
+    event_key TEXT NOT NULL,
+    payload JSONB NOT NULL,
+    status TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    published_at TIMESTAMPTZ NULL
+);
+
+CREATE UNIQUE INDEX idx_outbox_events_topic_key_unique
+    ON outbox_events(topic, event_key);
+CREATE INDEX idx_outbox_events_pending_created_at
+    ON outbox_events(created_at)
+    WHERE status = 'pending';
 ```
 
 Email используется как публичный ключ поиска avatar. Внутри системы email
 сначала сопоставляется с записью `users`, после чего вся работа с avatar и S3
 идет через стабильный UUID из `users.id`.
+
+После успешной загрузки original в S3 запись `avatars` и событие
+`outbox_events` создаются в одной транзакции. API делает best-effort publish в
+Kafka после commit. Если Kafka недоступна, outbox событие остается `pending` и
+может быть опубликовано повторным publisher-процессом без дублирования записи
+avatar.
+
+Worker периодически публикует pending outbox события. Интервал задается через
+`OUTBOX_POLL_INTERVAL`, размер пачки через `OUTBOX_BATCH_SIZE`.
 
 ## События брокера
 

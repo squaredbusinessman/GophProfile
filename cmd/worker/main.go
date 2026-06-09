@@ -2,13 +2,17 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
 
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/squaredbusinessman/GophProfile/internal/app"
+	queuekafka "github.com/squaredbusinessman/GophProfile/internal/queue/kafka"
+	"github.com/squaredbusinessman/GophProfile/internal/storage/postgres"
 )
 
 // main запускает worker приложения
@@ -24,7 +28,22 @@ func main() {
 
 	logger := app.NewLogger(cfg)
 
-	if err := app.RunWorker(ctx, cfg, logger); err != nil {
+	db, err := sql.Open("pgx", cfg.Postgres.DSN)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("open postgres connection pool")
+	}
+	defer db.Close()
+
+	kafkaClient, err := queuekafka.NewClient(cfg.Kafka.Brokers, cfg.Kafka.ClientID, cfg.Kafka.ConsumerGroup)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("create kafka client")
+	}
+	defer kafkaClient.Close()
+
+	outboxRepo := postgres.NewOutboxRepository(db)
+	outboxPublisher := app.NewOutboxPublisherService(outboxRepo, kafkaClient)
+
+	if err := app.RunWorker(ctx, cfg, logger, outboxPublisher); err != nil {
 		if !errors.Is(err, context.Canceled) {
 			logger.Fatal().Err(err).Msg("worker stopped with error")
 		}

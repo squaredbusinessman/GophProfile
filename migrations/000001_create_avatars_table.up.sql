@@ -70,3 +70,42 @@ CREATE INDEX IF NOT EXISTS idx_avatars_status
     ON avatars (status);
 
 COMMENT ON INDEX idx_avatars_status IS 'Ускоряет операционные запросы worker по статусу';
+
+CREATE TABLE IF NOT EXISTS outbox_events (
+    id uuid PRIMARY KEY,
+    topic text NOT NULL,
+    event_key text NOT NULL,
+    payload jsonb NOT NULL,
+    status text NOT NULL,
+    attempts integer NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+    last_error text NULL,
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL,
+    published_at timestamptz NULL,
+    CONSTRAINT outbox_events_status_check CHECK (
+        status IN ('pending', 'published')
+    )
+);
+
+COMMENT ON TABLE outbox_events IS 'Outbox события для надежной публикации в Kafka';
+COMMENT ON COLUMN outbox_events.id IS 'Уникальный идентификатор outbox события';
+COMMENT ON COLUMN outbox_events.topic IS 'Kafka topic для публикации события';
+COMMENT ON COLUMN outbox_events.event_key IS 'Ключ Kafka сообщения для идемпотентности';
+COMMENT ON COLUMN outbox_events.payload IS 'JSON payload события';
+COMMENT ON COLUMN outbox_events.status IS 'Статус публикации outbox события';
+COMMENT ON COLUMN outbox_events.attempts IS 'Количество неуспешных попыток публикации';
+COMMENT ON COLUMN outbox_events.last_error IS 'Последняя ошибка публикации';
+COMMENT ON COLUMN outbox_events.created_at IS 'Время создания события';
+COMMENT ON COLUMN outbox_events.updated_at IS 'Время последнего обновления события';
+COMMENT ON COLUMN outbox_events.published_at IS 'Время успешной публикации события';
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_outbox_events_topic_key_unique
+    ON outbox_events (topic, event_key);
+
+COMMENT ON INDEX idx_outbox_events_topic_key_unique IS 'Защищает от дублей событий по topic и key';
+
+CREATE INDEX IF NOT EXISTS idx_outbox_events_pending_created_at
+    ON outbox_events (created_at)
+    WHERE status = 'pending';
+
+COMMENT ON INDEX idx_outbox_events_pending_created_at IS 'Ускоряет выборку ожидающих публикации outbox событий';

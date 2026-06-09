@@ -55,7 +55,9 @@ type KafkaConfig struct {
 }
 
 type WorkerConfig struct {
-	ShutdownTimeout time.Duration
+	ShutdownTimeout    time.Duration
+	OutboxPollInterval time.Duration
+	OutboxBatchSize    int
 }
 
 type VaultConfig struct {
@@ -129,7 +131,9 @@ func Load() Config {
 			ConsumerGroup: envString("KAFKA_CONSUMER_GROUP", "gophprofile-avatar-worker"),
 		},
 		Worker: WorkerConfig{
-			ShutdownTimeout: envDuration("WORKER_SHUTDOWN_TIMEOUT", 10*time.Second),
+			ShutdownTimeout:    envDuration("WORKER_SHUTDOWN_TIMEOUT", 10*time.Second),
+			OutboxPollInterval: envDuration("OUTBOX_POLL_INTERVAL", 5*time.Second),
+			OutboxBatchSize:    envInt("OUTBOX_BATCH_SIZE", 100),
 		},
 		Vault: VaultConfig{
 			Addr:        envString("VAULT_ADDR", "http://localhost:8200"),
@@ -163,6 +167,20 @@ func envDuration(key string, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return duration
+}
+
+// envInt возвращает int из переменной окружения или дефолт
+func envInt(key string, fallback int) int {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed <= 0 {
+		return fallback
+	}
+	return parsed
 }
 
 // envBool возвращает boolean из переменной окружения или дефолт

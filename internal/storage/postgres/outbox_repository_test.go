@@ -1,0 +1,126 @@
+package postgres
+
+import (
+	"context"
+	"database/sql"
+	"regexp"
+	"testing"
+	"time"
+
+	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/squaredbusinessman/GophProfile/internal/domain/avatar"
+	"github.com/squaredbusinessman/GophProfile/internal/domain/outbox"
+)
+
+// TestCreateAvatarWithOutboxWritesBothRecordsInTransaction проверяет атомарную запись avatar и outbox
+func TestCreateAvatarWithOutboxWritesBothRecordsInTransaction(t *testing.T) {
+	db, mock := newMockDB(t)
+	repo := NewOutboxRepository(db)
+	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
+
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO avatars")).
+		WithArgs(
+			"4a992fa3-df1a-4b5f-b764-546e99643eb0",
+			"6f3f3c2d-df58-4e64-91ea-cdf90f4c9c1e",
+			"avatar.png",
+			"image/png",
+			int64(128),
+			sql.NullInt64{Int64: 10, Valid: true},
+			sql.NullInt64{Int64: 20, Valid: true},
+			string(avatar.StatusProcessing),
+			"avatars/6f3f3c2d-df58-4e64-91ea-cdf90f4c9c1e/avatar/original",
+			sql.NullString{},
+			sql.NullString{},
+			now,
+			now,
+			sql.NullTime{},
+		).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO outbox_events")).
+		WithArgs(
+			"7e9b73db-f6d6-466d-aaee-34d4e9e76615",
+			"avatar.process.v1",
+			"4a992fa3-df1a-4b5f-b764-546e99643eb0",
+			[]byte(`{"avatar_id":"4a992fa3-df1a-4b5f-b764-546e99643eb0"}`),
+			string(outbox.StatusPending),
+			0,
+			sql.NullString{},
+			now,
+			now,
+			sql.NullTime{},
+		).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	width := 10
+	height := 20
+	err := repo.CreateAvatarWithOutbox(context.Background(), avatar.Avatar{
+		ID:                "4a992fa3-df1a-4b5f-b764-546e99643eb0",
+		UserID:            "6f3f3c2d-df58-4e64-91ea-cdf90f4c9c1e",
+		FileName:          "avatar.png",
+		MimeType:          "image/png",
+		SizeBytes:         128,
+		Width:             &width,
+		Height:            &height,
+		Status:            avatar.StatusProcessing,
+		OriginalObjectKey: "avatars/6f3f3c2d-df58-4e64-91ea-cdf90f4c9c1e/avatar/original",
+		CreatedAt:         now,
+		UpdatedAt:         now,
+	}, outbox.Event{
+		ID:        "7e9b73db-f6d6-466d-aaee-34d4e9e76615",
+		Topic:     "avatar.process.v1",
+		Key:       "4a992fa3-df1a-4b5f-b764-546e99643eb0",
+		Payload:   []byte(`{"avatar_id":"4a992fa3-df1a-4b5f-b764-546e99643eb0"}`),
+		Status:    outbox.StatusPending,
+		CreatedAt: now,
+		UpdatedAt: now,
+	})
+	if err != nil {
+		t.Fatalf("CreateAvatarWithOutbox returned error: %v", err)
+	}
+
+	assertExpectations(t, mock)
+}
+
+// TestMarkOutboxPublishedUpdatesPendingEvent проверяет отметку успешной публикации
+func TestMarkOutboxPublishedUpdatesPendingEvent(t *testing.T) {
+	db, mock := newMockDB(t)
+	repo := NewOutboxRepository(db)
+	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
+
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE outbox_events")).
+		WithArgs("event-id", string(outbox.StatusPublished), now, string(outbox.StatusPending)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	if err := repo.MarkOutboxPublished(context.Background(), "event-id", now); err != nil {
+		t.Fatalf("MarkOutboxPublished returned error: %v", err)
+	}
+
+	assertExpectations(t, mock)
+}
+
+// TestMarkOutboxPublishAttemptFailedKeepsEventPending проверяет запись ошибки публикации
+func TestMarkOutboxPublishAttemptFailedKeepsEventPending(t *testing.T) {
+	db, mock := newMockDB(t)
+	repo := NewOutboxRepository(db)
+	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
+
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE outbox_events")).
+		WithArgs("event-id", "kafka down", now, string(outbox.StatusPending)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	err := repo.MarkOutboxPublishAttemptFailed(context.Background(), "event-id", assertError("kafka down"), now)
+	if err != nil {
+		t.Fatalf("MarkOutboxPublishAttemptFailed returned error: %v", err)
+	}
+
+	assertExpectations(t, mock)
+}
+
+type assertError string
+
+// Error возвращает текст fake-ошибки
+func (e assertError) Error() string {
+	return string(e)
+}

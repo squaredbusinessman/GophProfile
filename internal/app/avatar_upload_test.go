@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/squaredbusinessman/GophProfile/internal/domain/avatar"
+	"github.com/squaredbusinessman/GophProfile/internal/domain/outbox"
 	"github.com/squaredbusinessman/GophProfile/internal/domain/user"
 	queuekafka "github.com/squaredbusinessman/GophProfile/internal/queue/kafka"
 )
@@ -22,10 +23,10 @@ func TestUploadAvatarStoresOriginalCreatesAvatarAndPublishesEvent(t *testing.T) 
 			Email: "user@example.com",
 		},
 	}
-	avatars := &fakeAvatarStore{}
+	avatarOutbox := &fakeAvatarOutboxStore{}
 	objects := &fakeObjectStore{}
 	publisher := &fakeEventPublisher{}
-	service := NewAvatarUploadService(users, avatars, objects, publisher)
+	service := NewAvatarUploadService(users, avatarOutbox, objects, publisher)
 	service.now = func() time.Time { return now }
 
 	result, err := service.UploadAvatar(context.Background(), AvatarUploadRequest{
@@ -47,8 +48,8 @@ func TestUploadAvatarStoresOriginalCreatesAvatarAndPublishesEvent(t *testing.T) 
 	if !objects.putCalled {
 		t.Fatal("S3 Put should be called")
 	}
-	if !avatars.createCalled {
-		t.Fatal("CreateAvatar should be called")
+	if !avatarOutbox.createCalled {
+		t.Fatal("CreateAvatarWithOutbox should be called")
 	}
 	if !publisher.publishCalled {
 		t.Fatal("Publish should be called")
@@ -56,16 +57,23 @@ func TestUploadAvatarStoresOriginalCreatesAvatarAndPublishesEvent(t *testing.T) 
 	if publisher.topic != queuekafka.TopicAvatarProcess {
 		t.Fatalf("topic = %q, want avatar process topic", publisher.topic)
 	}
-	if avatars.created.Status != avatar.StatusProcessing {
-		t.Fatalf("created status = %q, want processing", avatars.created.Status)
+	if !avatarOutbox.markPublishedCalled {
+		t.Fatal("MarkOutboxPublished should be called after successful publish")
+	}
+	if avatarOutbox.created.Status != avatar.StatusProcessing {
+		t.Fatalf("created status = %q, want processing", avatarOutbox.created.Status)
+	}
+	if avatarOutbox.createdEvent.Topic != queuekafka.TopicAvatarProcess {
+		t.Fatalf("outbox topic = %q, want avatar process topic", avatarOutbox.createdEvent.Topic)
 	}
 }
 
 // TestUploadAvatarDoesNotCreateDBRecordWhenS3Fails проверяет порядок S3 до БД
 func TestUploadAvatarDoesNotCreateDBRecordWhenS3Fails(t *testing.T) {
+	avatarOutbox := &fakeAvatarOutboxStore{}
 	service := NewAvatarUploadService(
 		&fakeUserResolver{item: user.User{ID: "user-id", Email: "user@example.com"}},
-		&fakeAvatarStore{},
+		avatarOutbox,
 		&fakeObjectStore{putErr: errors.New("s3 down")},
 		&fakeEventPublisher{},
 	)
@@ -79,19 +87,18 @@ func TestUploadAvatarDoesNotCreateDBRecordWhenS3Fails(t *testing.T) {
 		t.Fatal("UploadAvatar should return error")
 	}
 
-	avatars := service.avatars.(*fakeAvatarStore)
-	if avatars.createCalled {
-		t.Fatal("CreateAvatar should not be called after S3 failure")
+	if avatarOutbox.createCalled {
+		t.Fatal("CreateAvatarWithOutbox should not be called after S3 failure")
 	}
 }
 
-// TestUploadAvatarMarksFailedWhenPublishFails проверяет компенсацию после ошибки publish
-func TestUploadAvatarMarksFailedWhenPublishFails(t *testing.T) {
-	avatars := &fakeAvatarStore{}
+// TestUploadAvatarKeepsOutboxPendingWhenPublishFails проверяет outbox компенсацию после ошибки publish
+func TestUploadAvatarKeepsOutboxPendingWhenPublishFails(t *testing.T) {
+	avatarOutbox := &fakeAvatarOutboxStore{}
 	publisher := &fakeEventPublisher{publishErr: errors.New("kafka down")}
 	service := NewAvatarUploadService(
 		&fakeUserResolver{item: user.User{ID: "user-id", Email: "user@example.com"}},
-		avatars,
+		avatarOutbox,
 		&fakeObjectStore{},
 		publisher,
 	)
@@ -101,14 +108,14 @@ func TestUploadAvatarMarksFailedWhenPublishFails(t *testing.T) {
 		ContentType: "image/png",
 		Reader:      bytes.NewReader([]byte("payload")),
 	})
-	if err == nil {
-		t.Fatal("UploadAvatar should return publish error")
+	if err != nil {
+		t.Fatalf("UploadAvatar returned error: %v", err)
 	}
-	if avatars.updatedStatus != avatar.StatusFailed {
-		t.Fatalf("updatedStatus = %q, want failed", avatars.updatedStatus)
+	if !avatarOutbox.markFailedAttemptCalled {
+		t.Fatal("MarkOutboxPublishAttemptFailed should be called")
 	}
-	if publisher.publishCalls != avatarPublishAttempts {
-		t.Fatalf("publishCalls = %d, want %d", publisher.publishCalls, avatarPublishAttempts)
+	if publisher.publishCalls != 1 {
+		t.Fatalf("publishCalls = %d, want best effort single publish", publisher.publishCalls)
 	}
 }
 
@@ -125,23 +132,32 @@ func (f *fakeUserResolver) FindOrCreateUserByEmail(ctx context.Context, email st
 	return f.item, nil
 }
 
-type fakeAvatarStore struct {
-	createCalled  bool
-	created       avatar.Avatar
-	createErr     error
-	updatedStatus avatar.Status
+type fakeAvatarOutboxStore struct {
+	createCalled            bool
+	created                 avatar.Avatar
+	createdEvent            outbox.Event
+	createErr               error
+	markPublishedCalled     bool
+	markFailedAttemptCalled bool
 }
 
-// CreateAvatar запоминает fake-запись avatar
-func (f *fakeAvatarStore) CreateAvatar(ctx context.Context, item avatar.Avatar) error {
+// CreateAvatarWithOutbox запоминает fake-запись avatar и outbox событие
+func (f *fakeAvatarOutboxStore) CreateAvatarWithOutbox(ctx context.Context, item avatar.Avatar, event outbox.Event) error {
 	f.createCalled = true
 	f.created = item
+	f.createdEvent = event
 	return f.createErr
 }
 
-// UpdateAvatarStatus запоминает fake-статус avatar
-func (f *fakeAvatarStore) UpdateAvatarStatus(ctx context.Context, id string, status avatar.Status, updatedAt time.Time) error {
-	f.updatedStatus = status
+// MarkOutboxPublished запоминает fake-успешную публикацию outbox
+func (f *fakeAvatarOutboxStore) MarkOutboxPublished(ctx context.Context, id string, publishedAt time.Time) error {
+	f.markPublishedCalled = true
+	return nil
+}
+
+// MarkOutboxPublishAttemptFailed запоминает fake-ошибку публикации outbox
+func (f *fakeAvatarOutboxStore) MarkOutboxPublishAttemptFailed(ctx context.Context, id string, publishErr error, updatedAt time.Time) error {
+	f.markFailedAttemptCalled = true
 	return nil
 }
 
