@@ -391,7 +391,7 @@ Worker периодически публикует pending outbox события
 ## События брокера
 
 ```go
-type AvatarUploadEvent struct {
+type AvatarProcessEvent struct {
     AvatarID          string `json:"avatar_id"`
     UserID            string `json:"user_id"`
     Email             string `json:"email"`
@@ -399,11 +399,7 @@ type AvatarUploadEvent struct {
     Thumb100ObjectKey string `json:"thumb_100_object_key"`
     Thumb300ObjectKey string `json:"thumb_300_object_key"`
     ContentType        string `json:"content_type"`
-}
-
-type AvatarProcessEvent struct {
-    AvatarID   string         `json:"avatar_id"`
-    Operations []ProcessingOp `json:"operations"`
+    Attempt            int    `json:"attempt"`
 }
 
 type AvatarDeleteEvent struct {
@@ -412,11 +408,21 @@ type AvatarDeleteEvent struct {
 }
 ```
 
+Kafka topics:
+
+- `avatar.process.v1`
+- `avatar.process.retry.1m.v1`
+- `avatar.process.retry.5m.v1`
+- `avatar.process.retry.30m.v1`
+- `avatar.process.dead-letter.v1`
+
 Требования к идемпотентности:
 
 - Использовать уникальные идентификаторы сообщений
 - Проверять статус обработки перед выполнением операций
 - Реализовать retry с экспоненциальным backoff
+- Использовать `avatar_id` как Kafka message key
+- Коммитить offset только после успешной обработки, retry publish или dead-letter publish
 
 ## Тестирование
 

@@ -106,6 +106,36 @@ func (r *AvatarRepository) GetAvatar(ctx context.Context, id string) (avatar.Ava
 	return item, nil
 }
 
+// GetAvatarIncludingDeleted возвращает avatar по id включая мягко удаленные записи
+func (r *AvatarRepository) GetAvatarIncludingDeleted(ctx context.Context, id string) (avatar.Avatar, error) {
+	row := r.db.QueryRowContext(ctx, `
+		SELECT
+			id,
+			user_id,
+			file_name,
+			mime_type,
+			size_bytes,
+			width,
+			height,
+			status,
+			original_object_key,
+			thumb_100_object_key,
+			thumb_300_object_key,
+			created_at,
+			updated_at,
+			deleted_at
+		FROM avatars
+		WHERE id = $1
+	`, id)
+
+	item, err := scanAvatar(row)
+	if err != nil {
+		return avatar.Avatar{}, err
+	}
+
+	return item, nil
+}
+
 // ListAvatarsByUser возвращает активные avatar пользователя по внутреннему UUID
 func (r *AvatarRepository) ListAvatarsByUser(ctx context.Context, userID string, limit int, offset int) ([]avatar.Avatar, error) {
 	if limit <= 0 {

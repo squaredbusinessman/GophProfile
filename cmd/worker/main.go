@@ -13,6 +13,7 @@ import (
 	"github.com/squaredbusinessman/GophProfile/internal/app"
 	queuekafka "github.com/squaredbusinessman/GophProfile/internal/queue/kafka"
 	"github.com/squaredbusinessman/GophProfile/internal/storage/postgres"
+	storages3 "github.com/squaredbusinessman/GophProfile/internal/storage/s3"
 )
 
 // main запускает worker приложения
@@ -40,10 +41,17 @@ func main() {
 	}
 	defer kafkaClient.Close()
 
+	s3Client, err := storages3.NewClient(cfg.S3)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("create s3 client")
+	}
+
+	avatarRepo := postgres.NewAvatarRepository(db)
 	outboxRepo := postgres.NewOutboxRepository(db)
 	outboxPublisher := app.NewOutboxPublisherService(outboxRepo, kafkaClient)
+	avatarProcessor := app.NewAvatarProcessService(avatarRepo, s3Client, kafkaClient)
 
-	if err := app.RunWorker(ctx, cfg, logger, outboxPublisher); err != nil {
+	if err := app.RunWorker(ctx, cfg, logger, outboxPublisher, kafkaClient, avatarProcessor); err != nil {
 		if !errors.Is(err, context.Canceled) {
 			logger.Fatal().Err(err).Msg("worker stopped with error")
 		}

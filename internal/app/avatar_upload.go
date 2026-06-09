@@ -74,6 +74,7 @@ type AvatarProcessEvent struct {
 	Thumb100ObjectKey string `json:"thumb_100_object_key"`
 	Thumb300ObjectKey string `json:"thumb_300_object_key"`
 	ContentType       string `json:"content_type"`
+	Attempt           int    `json:"attempt"`
 }
 
 // NewAvatarUploadService создает service загрузки avatar
@@ -138,6 +139,7 @@ func (s *AvatarUploadService) UploadAvatar(ctx context.Context, req AvatarUpload
 		Thumb100ObjectKey: thumb100Key,
 		Thumb300ObjectKey: thumb300Key,
 		ContentType:       req.ContentType,
+		Attempt:           initialProcessAttempt,
 	}
 	payload, err := json.Marshal(event)
 	if err != nil {
