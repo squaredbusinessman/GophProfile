@@ -247,7 +247,7 @@ function renderGallery(avatars) {
 
   avatars.forEach((avatar) => {
     const id = avatar.id || avatar.avatar_id;
-    const userEmail = avatar.user_id || galleryUserEmail.value.trim();
+    const userEmail = avatar.email || avatar.user_email || galleryUserEmail.value.trim();
     const imageUrl = avatar.url || `/api/v1/avatars/${encodeURIComponent(id)}?size=100x100`;
     const card = document.createElement('article');
     const image = document.createElement('img');
@@ -273,6 +273,7 @@ function renderGallery(avatars) {
     image.alt = `Аватарка ${id || ''}`;
     title.textContent = id || 'Без ID';
     meta.textContent = [
+      avatar.user_id ? `user_id: ${avatar.user_id}` : null,
       userEmail ? `email: ${userEmail}` : null,
       avatar.status ? `status: ${avatar.status}` : null,
       avatar.processing_status ? `processing: ${avatar.processing_status}` : null

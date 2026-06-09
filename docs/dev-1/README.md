@@ -54,7 +54,7 @@ Object storage изолируется через [S3-слой](s3-storage.md).
 - Ограничить размер файлов
 - Добавить rate limiting для API
 - Настроить CORS
-- Валидировать email пользователя из `X-User-ID`
+- Валидировать email пользователя из `X-User-ID` и сопоставлять его с внутренним `user_id`
 
 ## API
 
@@ -86,7 +86,8 @@ file: binary
 ```json
 {
   "id": "uuid",
-  "user_id": "user@example.com",
+  "user_id": "uuid",
+  "email": "user@example.com",
   "url": "string",
   "status": "processing",
   "created_at": "2024-01-01T00:00:00Z"
@@ -194,7 +195,8 @@ GET /api/v1/avatars/{avatar_id}/metadata
 ```json
 {
   "id": "uuid",
-  "user_id": "user@example.com",
+  "user_id": "uuid",
+  "email": "user@example.com",
   "file_name": "avatar.jpg",
   "mime_type": "image/jpeg",
   "size": 1024000,
@@ -318,32 +320,52 @@ avatars-service/
 Пример схемы PostgreSQL:
 
 ```sql
-CREATE TABLE avatars (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id VARCHAR(255) NOT NULL,
-    file_name VARCHAR(255) NOT NULL,
-    mime_type VARCHAR(100) NOT NULL,
-    size_bytes BIGINT NOT NULL,
-    s3_key VARCHAR(500) NOT NULL,
-    thumbnail_s3_keys JSONB,
-    upload_status VARCHAR(50) DEFAULT 'uploading',
-    processing_status VARCHAR(50) DEFAULT 'pending',
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    deleted_at TIMESTAMP WITH TIME ZONE
+CREATE TABLE users (
+    id UUID PRIMARY KEY,
+    email TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    deleted_at TIMESTAMPTZ NULL
 );
 
-CREATE INDEX idx_avatars_user_id ON avatars(user_id) WHERE deleted_at IS NULL;
-CREATE INDEX idx_avatars_status ON avatars(upload_status, processing_status);
+CREATE UNIQUE INDEX idx_users_email_active_unique
+    ON users (lower(email))
+    WHERE deleted_at IS NULL;
+
+CREATE TABLE avatars (
+    id UUID PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id),
+    file_name TEXT NOT NULL,
+    mime_type TEXT NOT NULL,
+    size_bytes BIGINT NOT NULL,
+    width INTEGER NULL,
+    height INTEGER NULL,
+    status TEXT NOT NULL,
+    original_object_key TEXT NOT NULL,
+    thumb_100_object_key TEXT NULL,
+    thumb_300_object_key TEXT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    deleted_at TIMESTAMPTZ NULL
+);
+
+CREATE INDEX idx_avatars_user_id_created_at ON avatars(user_id, created_at DESC);
+CREATE INDEX idx_avatars_user_id_active ON avatars(user_id) WHERE deleted_at IS NULL;
+CREATE INDEX idx_avatars_status ON avatars(status);
 ```
+
+Email используется как публичный ключ поиска avatar. Внутри системы email
+сначала сопоставляется с записью `users`, после чего вся работа с avatar и S3
+идет через стабильный UUID из `users.id`.
 
 ## События брокера
 
 ```go
 type AvatarUploadEvent struct {
-    AvatarID  string `json:"avatar_id"`
-    UserEmail string `json:"user_id"`
-    S3Key     string `json:"s3_key"`
+    AvatarID string `json:"avatar_id"`
+    UserID   string `json:"user_id"`
+    Email    string `json:"email"`
+    S3Key    string `json:"s3_key"`
 }
 
 type AvatarProcessEvent struct {

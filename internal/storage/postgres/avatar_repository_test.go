@@ -21,14 +21,14 @@ func TestCreateAvatarInsertsAllFields(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO avatars")).
 		WithArgs(
 			"4a992fa3-df1a-4b5f-b764-546e99643eb0",
-			"user@example.com",
+			"6f3f3c2d-df58-4e64-91ea-cdf90f4c9c1e",
 			"avatar.jpg",
 			"image/jpeg",
 			int64(128),
 			sql.NullInt64{},
 			sql.NullInt64{},
 			string(avatar.StatusProcessing),
-			"avatars/user@example.com/avatar/original",
+			"avatars/6f3f3c2d-df58-4e64-91ea-cdf90f4c9c1e/avatar/original",
 			sql.NullString{},
 			sql.NullString{},
 			now,
@@ -39,12 +39,12 @@ func TestCreateAvatarInsertsAllFields(t *testing.T) {
 
 	err := repo.CreateAvatar(context.Background(), avatar.Avatar{
 		ID:                "4a992fa3-df1a-4b5f-b764-546e99643eb0",
-		UserEmail:         "user@example.com",
+		UserID:            "6f3f3c2d-df58-4e64-91ea-cdf90f4c9c1e",
 		FileName:          "avatar.jpg",
 		MimeType:          "image/jpeg",
 		SizeBytes:         128,
 		Status:            avatar.StatusProcessing,
-		OriginalObjectKey: "avatars/user@example.com/avatar/original",
+		OriginalObjectKey: "avatars/6f3f3c2d-df58-4e64-91ea-cdf90f4c9c1e/avatar/original",
 		CreatedAt:         now,
 		UpdatedAt:         now,
 	})
@@ -64,14 +64,14 @@ func TestGetAvatarFiltersSoftDeleted(t *testing.T) {
 	rows := sqlmock.NewRows(avatarColumns()).
 		AddRow(
 			"4a992fa3-df1a-4b5f-b764-546e99643eb0",
-			"user@example.com",
+			"6f3f3c2d-df58-4e64-91ea-cdf90f4c9c1e",
 			"avatar.jpg",
 			"image/jpeg",
 			int64(128),
 			nil,
 			nil,
 			string(avatar.StatusProcessing),
-			"avatars/user@example.com/avatar/original",
+			"avatars/6f3f3c2d-df58-4e64-91ea-cdf90f4c9c1e/avatar/original",
 			nil,
 			nil,
 			now,
@@ -114,8 +114,8 @@ func TestGetAvatarReturnsNotFound(t *testing.T) {
 	assertExpectations(t, mock)
 }
 
-// TestListAvatarsByUserEmailFiltersSoftDeleted проверяет список активных avatar по email пользователя
-func TestListAvatarsByUserEmailFiltersSoftDeleted(t *testing.T) {
+// TestListAvatarsByUserFiltersSoftDeleted проверяет список активных avatar по UUID пользователя
+func TestListAvatarsByUserFiltersSoftDeleted(t *testing.T) {
 	db, mock := newMockDB(t)
 	repo := NewAvatarRepository(db)
 	now := time.Date(2026, 6, 8, 10, 0, 0, 0, time.UTC)
@@ -123,14 +123,14 @@ func TestListAvatarsByUserEmailFiltersSoftDeleted(t *testing.T) {
 	rows := sqlmock.NewRows(avatarColumns()).
 		AddRow(
 			"4a992fa3-df1a-4b5f-b764-546e99643eb0",
-			"user@example.com",
+			"6f3f3c2d-df58-4e64-91ea-cdf90f4c9c1e",
 			"avatar.jpg",
 			"image/jpeg",
 			int64(128),
 			nil,
 			nil,
 			string(avatar.StatusProcessing),
-			"avatars/user@example.com/avatar/original",
+			"avatars/6f3f3c2d-df58-4e64-91ea-cdf90f4c9c1e/avatar/original",
 			nil,
 			nil,
 			now,
@@ -139,12 +139,12 @@ func TestListAvatarsByUserEmailFiltersSoftDeleted(t *testing.T) {
 		)
 
 	mock.ExpectQuery(regexp.QuoteMeta("FROM avatars")).
-		WithArgs("user@example.com", 25, 5).
+		WithArgs("6f3f3c2d-df58-4e64-91ea-cdf90f4c9c1e", 25, 5).
 		WillReturnRows(rows)
 
-	items, err := repo.ListAvatarsByUserEmail(context.Background(), "user@example.com", 25, 5)
+	items, err := repo.ListAvatarsByUser(context.Background(), "6f3f3c2d-df58-4e64-91ea-cdf90f4c9c1e", 25, 5)
 	if err != nil {
-		t.Fatalf("ListAvatarsByUserEmail returned error: %v", err)
+		t.Fatalf("ListAvatarsByUser returned error: %v", err)
 	}
 	if len(items) != 1 {
 		t.Fatalf("len(items) = %d, want 1", len(items))
@@ -191,10 +191,10 @@ func TestSoftDeleteAvatarMarksDeleting(t *testing.T) {
 	deletedAt := time.Date(2026, 6, 8, 10, 0, 0, 0, time.UTC)
 
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE avatars")).
-		WithArgs("avatar-id", "user@example.com", string(avatar.StatusDeleting), deletedAt).
+		WithArgs("avatar-id", "6f3f3c2d-df58-4e64-91ea-cdf90f4c9c1e", string(avatar.StatusDeleting), deletedAt).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
-	err := repo.SoftDeleteAvatar(context.Background(), "avatar-id", "user@example.com", deletedAt)
+	err := repo.SoftDeleteAvatar(context.Background(), "avatar-id", "6f3f3c2d-df58-4e64-91ea-cdf90f4c9c1e", deletedAt)
 	if err != nil {
 		t.Fatalf("SoftDeleteAvatar returned error: %v", err)
 	}

@@ -32,9 +32,9 @@ func TestValidateStatusRejectsUnknownStatus(t *testing.T) {
 
 // TestObjectKeysReturnsKnownKeys проверяет сбор object keys avatar
 func TestObjectKeysReturnsKnownKeys(t *testing.T) {
-	thumb100 := "avatars/user/avatar/100x100"
+	thumb100 := "avatars/6f3f3c2d-df58-4e64-91ea-cdf90f4c9c1e/avatar/100x100"
 	item := Avatar{
-		OriginalObjectKey: "avatars/user/avatar/original",
+		OriginalObjectKey: "avatars/6f3f3c2d-df58-4e64-91ea-cdf90f4c9c1e/avatar/original",
 		Thumb100ObjectKey: &thumb100,
 	}
 
@@ -42,7 +42,7 @@ func TestObjectKeysReturnsKnownKeys(t *testing.T) {
 	if len(keys) != 2 {
 		t.Fatalf("len(keys) = %d, want 2", len(keys))
 	}
-	if keys[0] != "avatars/user/avatar/original" || keys[1] != thumb100 {
+	if keys[0] != "avatars/6f3f3c2d-df58-4e64-91ea-cdf90f4c9c1e/avatar/original" || keys[1] != thumb100 {
 		t.Fatalf("keys = %#v, want original and thumb100", keys)
 	}
 }

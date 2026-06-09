@@ -205,24 +205,24 @@ func (a *minioAdapter) BucketExists(ctx context.Context, bucket string) (bool, e
 	return a.sdk.BucketExists(ctx, bucket)
 }
 
-// OriginalObjectKey возвращает object key оригинального изображения по email пользователя
-func OriginalObjectKey(userEmail string, avatarID string) string {
-	return joinKeyParts("avatars", objectKeySegment(userEmail), objectKeySegment(avatarID), "original")
+// OriginalObjectKey возвращает object key оригинального изображения по UUID пользователя
+func OriginalObjectKey(userID string, avatarID string) string {
+	return joinKeyParts("avatars", objectKeySegment(userID), objectKeySegment(avatarID), "original")
 }
 
-// Thumb100ObjectKey возвращает object key миниатюры 100x100 по email пользователя
-func Thumb100ObjectKey(userEmail string, avatarID string) string {
-	return ThumbnailObjectKey(userEmail, avatarID, "100x100")
+// Thumb100ObjectKey возвращает object key миниатюры 100x100 по UUID пользователя
+func Thumb100ObjectKey(userID string, avatarID string) string {
+	return ThumbnailObjectKey(userID, avatarID, "100x100")
 }
 
-// Thumb300ObjectKey возвращает object key миниатюры 300x300 по email пользователя
-func Thumb300ObjectKey(userEmail string, avatarID string) string {
-	return ThumbnailObjectKey(userEmail, avatarID, "300x300")
+// Thumb300ObjectKey возвращает object key миниатюры 300x300 по UUID пользователя
+func Thumb300ObjectKey(userID string, avatarID string) string {
+	return ThumbnailObjectKey(userID, avatarID, "300x300")
 }
 
-// ThumbnailObjectKey возвращает object key миниатюры указанного размера по email пользователя
-func ThumbnailObjectKey(userEmail string, avatarID string, size string) string {
-	return joinKeyParts("avatars", objectKeySegment(userEmail), objectKeySegment(avatarID), objectKeySegment(size))
+// ThumbnailObjectKey возвращает object key миниатюры указанного размера по UUID пользователя
+func ThumbnailObjectKey(userID string, avatarID string, size string) string {
+	return joinKeyParts("avatars", objectKeySegment(userID), objectKeySegment(avatarID), objectKeySegment(size))
 }
 
 // parseEndpoint разбирает endpoint в формат MinIO SDK
@@ -276,7 +276,7 @@ func joinKeyParts(parts ...string) string {
 	return strings.Join(cleaned, "/")
 }
 
-// objectKeySegment экранирует сегмент object key для безопасного хранения email
+// objectKeySegment экранирует сегмент object key для безопасного хранения
 func objectKeySegment(value string) string {
 	return url.PathEscape(strings.Trim(value, "/"))
 }
