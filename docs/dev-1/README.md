@@ -39,6 +39,7 @@ Object storage изолируется через [S3-слой](s3-storage.md).
 - Реализовать асинхронное удаление файлов из S3
 - Обеспечить идемпотентность обработки
 - Реализовать retry с экспоненциальным backoff
+- Для работы с Kafka использовать Confluent Kafka Go client
 
 ### 3. Обеспечить качество и контейнеризацию сервиса
 
@@ -362,10 +363,13 @@ Email используется как публичный ключ поиска a
 
 ```go
 type AvatarUploadEvent struct {
-    AvatarID string `json:"avatar_id"`
-    UserID   string `json:"user_id"`
-    Email    string `json:"email"`
-    S3Key    string `json:"s3_key"`
+    AvatarID          string `json:"avatar_id"`
+    UserID            string `json:"user_id"`
+    Email             string `json:"email"`
+    OriginalObjectKey string `json:"original_object_key"`
+    Thumb100ObjectKey string `json:"thumb_100_object_key"`
+    Thumb300ObjectKey string `json:"thumb_300_object_key"`
+    ContentType        string `json:"content_type"`
 }
 
 type AvatarProcessEvent struct {
