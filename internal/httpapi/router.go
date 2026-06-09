@@ -187,7 +187,7 @@ func (r *Router) handleAvatarUpload(w http.ResponseWriter, req *http.Request) {
 	}
 
 	result, err := r.avatarUploader.UploadAvatar(req.Context(), app.AvatarUploadRequest{
-		UserEmail:   upload.UserEmail,
+		UserID:      upload.UserID,
 		FileName:    upload.FileName,
 		ContentType: upload.ContentType,
 		Size:        int64(len(body)),
@@ -206,7 +206,6 @@ func (r *Router) handleAvatarUpload(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, http.StatusCreated, AvatarUploadResponse{
 		ID:        result.ID,
 		UserID:    result.UserID,
-		Email:     result.Email,
 		URL:       "/api/v1/avatars/" + result.ID,
 		Status:    string(result.Status),
 		Width:     result.Width,
@@ -428,7 +427,6 @@ type HealthResponse struct {
 type AvatarUploadResponse struct {
 	ID        string    `json:"id"`
 	UserID    string    `json:"user_id"`
-	Email     string    `json:"email"`
 	URL       string    `json:"url"`
 	Status    string    `json:"status"`
 	Width     int       `json:"width,omitempty"`

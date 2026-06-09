@@ -41,7 +41,6 @@ type AvatarProcessService struct {
 type AvatarProcessMessage struct {
 	AvatarID          string `json:"avatar_id"`
 	UserID            string `json:"user_id"`
-	Email             string `json:"email,omitempty"`
 	OriginalObjectKey string `json:"original_object_key"`
 	Thumb100ObjectKey string `json:"thumb_100_object_key,omitempty"`
 	Thumb300ObjectKey string `json:"thumb_300_object_key,omitempty"`

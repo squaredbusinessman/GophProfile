@@ -10,27 +10,22 @@ import (
 
 	"github.com/squaredbusinessman/GophProfile/internal/domain/avatar"
 	"github.com/squaredbusinessman/GophProfile/internal/domain/outbox"
-	"github.com/squaredbusinessman/GophProfile/internal/domain/user"
 	queuekafka "github.com/squaredbusinessman/GophProfile/internal/queue/kafka"
 )
+
+const uploadTestUserID = "6f3f3c2d-df58-4e64-91ea-cdf90f4c9c1e"
 
 // TestUploadAvatarStoresOriginalCreatesAvatarAndPublishesEvent проверяет успешный поток upload
 func TestUploadAvatarStoresOriginalCreatesAvatarAndPublishesEvent(t *testing.T) {
 	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
-	users := &fakeUserResolver{
-		item: user.User{
-			ID:    "6f3f3c2d-df58-4e64-91ea-cdf90f4c9c1e",
-			Email: "user@example.com",
-		},
-	}
 	avatarOutbox := &fakeAvatarOutboxStore{}
 	objects := &fakeObjectStore{}
 	publisher := &fakeEventPublisher{}
-	service := NewAvatarUploadService(users, avatarOutbox, objects, publisher)
+	service := NewAvatarUploadService(avatarOutbox, objects, publisher)
 	service.now = func() time.Time { return now }
 
 	result, err := service.UploadAvatar(context.Background(), AvatarUploadRequest{
-		UserEmail:   "user@example.com",
+		UserID:      uploadTestUserID,
 		FileName:    "avatar.png",
 		ContentType: "image/png",
 		Size:        7,
@@ -42,8 +37,8 @@ func TestUploadAvatarStoresOriginalCreatesAvatarAndPublishesEvent(t *testing.T) 
 		t.Fatalf("UploadAvatar returned error: %v", err)
 	}
 
-	if result.UserID != "6f3f3c2d-df58-4e64-91ea-cdf90f4c9c1e" {
-		t.Fatalf("UserID = %q, want resolved user id", result.UserID)
+	if result.UserID != uploadTestUserID {
+		t.Fatalf("UserID = %q, want request user id", result.UserID)
 	}
 	if !objects.putCalled {
 		t.Fatal("S3 Put should be called")
@@ -63,6 +58,9 @@ func TestUploadAvatarStoresOriginalCreatesAvatarAndPublishesEvent(t *testing.T) 
 	if avatarOutbox.created.Status != avatar.StatusProcessing {
 		t.Fatalf("created status = %q, want processing", avatarOutbox.created.Status)
 	}
+	if avatarOutbox.created.UserID != uploadTestUserID {
+		t.Fatalf("created UserID = %q, want request user id", avatarOutbox.created.UserID)
+	}
 	if avatarOutbox.createdEvent.Topic != queuekafka.TopicAvatarProcess {
 		t.Fatalf("outbox topic = %q, want avatar process topic", avatarOutbox.createdEvent.Topic)
 	}
@@ -72,14 +70,13 @@ func TestUploadAvatarStoresOriginalCreatesAvatarAndPublishesEvent(t *testing.T) 
 func TestUploadAvatarDoesNotCreateDBRecordWhenS3Fails(t *testing.T) {
 	avatarOutbox := &fakeAvatarOutboxStore{}
 	service := NewAvatarUploadService(
-		&fakeUserResolver{item: user.User{ID: "user-id", Email: "user@example.com"}},
 		avatarOutbox,
 		&fakeObjectStore{putErr: errors.New("s3 down")},
 		&fakeEventPublisher{},
 	)
 
 	_, err := service.UploadAvatar(context.Background(), AvatarUploadRequest{
-		UserEmail:   "user@example.com",
+		UserID:      uploadTestUserID,
 		ContentType: "image/png",
 		Reader:      bytes.NewReader([]byte("payload")),
 	})
@@ -97,14 +94,13 @@ func TestUploadAvatarKeepsOutboxPendingWhenPublishFails(t *testing.T) {
 	avatarOutbox := &fakeAvatarOutboxStore{}
 	publisher := &fakeEventPublisher{publishErr: errors.New("kafka down")}
 	service := NewAvatarUploadService(
-		&fakeUserResolver{item: user.User{ID: "user-id", Email: "user@example.com"}},
 		avatarOutbox,
 		&fakeObjectStore{},
 		publisher,
 	)
 
 	_, err := service.UploadAvatar(context.Background(), AvatarUploadRequest{
-		UserEmail:   "user@example.com",
+		UserID:      uploadTestUserID,
 		ContentType: "image/png",
 		Reader:      bytes.NewReader([]byte("payload")),
 	})
@@ -117,19 +113,6 @@ func TestUploadAvatarKeepsOutboxPendingWhenPublishFails(t *testing.T) {
 	if publisher.publishCalls != 1 {
 		t.Fatalf("publishCalls = %d, want best effort single publish", publisher.publishCalls)
 	}
-}
-
-type fakeUserResolver struct {
-	item user.User
-	err  error
-}
-
-// FindOrCreateUserByEmail возвращает fake-пользователя
-func (f *fakeUserResolver) FindOrCreateUserByEmail(ctx context.Context, email string, now time.Time) (user.User, error) {
-	if f.err != nil {
-		return user.User{}, f.err
-	}
-	return f.item, nil
 }
 
 type fakeAvatarOutboxStore struct {

@@ -24,7 +24,6 @@ func TestAvatarUploadReturnsCreated(t *testing.T) {
 		result: app.AvatarUploadResult{
 			ID:        "4a992fa3-df1a-4b5f-b764-546e99643eb0",
 			UserID:    "6f3f3c2d-df58-4e64-91ea-cdf90f4c9c1e",
-			Email:     "user@example.com",
 			Status:    avatar.StatusProcessing,
 			Width:     2,
 			Height:    3,
@@ -38,7 +37,7 @@ func TestAvatarUploadReturnsCreated(t *testing.T) {
 		AvatarUploader: uploader,
 	})
 
-	req := validAvatarUploadHTTPRequest(t, "User@Example.COM")
+	req := validAvatarUploadHTTPRequest(t, "6F3F3C2D-DF58-4E64-91EA-CDF90F4C9C1E")
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -46,8 +45,8 @@ func TestAvatarUploadReturnsCreated(t *testing.T) {
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusCreated, rec.Body.String())
 	}
-	if uploader.request.UserEmail != "user@example.com" {
-		t.Fatalf("UserEmail = %q, want normalized email", uploader.request.UserEmail)
+	if uploader.request.UserID != "6f3f3c2d-df58-4e64-91ea-cdf90f4c9c1e" {
+		t.Fatalf("UserID = %q, want normalized user id", uploader.request.UserID)
 	}
 	if uploader.request.Width != 2 || uploader.request.Height != 3 {
 		t.Fatalf("dimensions = %dx%d, want 2x3", uploader.request.Width, uploader.request.Height)
@@ -63,13 +62,10 @@ func TestAvatarUploadReturnsCreated(t *testing.T) {
 	if response.UserID != "6f3f3c2d-df58-4e64-91ea-cdf90f4c9c1e" {
 		t.Fatalf("UserID = %q, want internal user id", response.UserID)
 	}
-	if response.Email != "user@example.com" {
-		t.Fatalf("Email = %q, want email", response.Email)
-	}
 }
 
-// TestAvatarUploadRejectsMissingUserEmail проверяет обязательный X-User-ID
-func TestAvatarUploadRejectsMissingUserEmail(t *testing.T) {
+// TestAvatarUploadRejectsMissingUserID проверяет обязательный X-User-ID
+func TestAvatarUploadRejectsMissingUserID(t *testing.T) {
 	handler := NewRouter(RouterConfig{
 		ServiceName:    "gophprofile",
 		Version:        "test",
@@ -95,7 +91,7 @@ func TestAvatarUploadReturnsUnavailableWithoutService(t *testing.T) {
 		Logger:      zerolog.Nop(),
 	})
 
-	req := validAvatarUploadHTTPRequest(t, "user@example.com")
+	req := validAvatarUploadHTTPRequest(t, testUserID)
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -121,7 +117,7 @@ func (f *fakeAvatarUploader) UploadAvatar(ctx context.Context, req app.AvatarUpl
 }
 
 // validAvatarUploadHTTPRequest создает валидный multipart upload request
-func validAvatarUploadHTTPRequest(t *testing.T, userEmail string) *http.Request {
+func validAvatarUploadHTTPRequest(t *testing.T, userID string) *http.Request {
 	t.Helper()
 
 	var body bytes.Buffer
@@ -142,8 +138,8 @@ func validAvatarUploadHTTPRequest(t *testing.T, userEmail string) *http.Request 
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/avatars", &body)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
-	if userEmail != "" {
-		req.Header.Set("X-User-ID", userEmail)
+	if userID != "" {
+		req.Header.Set("X-User-ID", userID)
 	}
 	return req
 }

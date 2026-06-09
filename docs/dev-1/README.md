@@ -56,7 +56,7 @@ Object storage изолируется через [S3-слой](s3-storage.md).
 - Ограничить размер файлов
 - Добавить rate limiting для API
 - Настроить CORS
-- Валидировать email пользователя из `X-User-ID` и сопоставлять его с внутренним `user_id`
+- Валидировать внутренний UUID пользователя из `X-User-ID`
 
 ## API
 
@@ -65,7 +65,7 @@ Object storage изолируется через [S3-слой](s3-storage.md).
 ```http
 POST /api/v1/avatars
 Content-Type: multipart/form-data
-X-User-ID: email
+X-User-ID: uuid
 ```
 
 Поля запроса:
@@ -76,7 +76,7 @@ file: binary
 
 Ограничения:
 
-- `X-User-ID` обязателен и должен содержать email пользователя
+- `X-User-ID` обязателен и должен содержать внутренний UUID пользователя
 - `file` обязателен
 - Максимальный размер файла `10MB`
 - Форматы `JPEG`, `PNG`, `WebP` опционально
@@ -89,7 +89,6 @@ file: binary
 {
   "id": "uuid",
   "user_id": "uuid",
-  "email": "user@example.com",
   "url": "string",
   "status": "processing",
   "created_at": "2024-01-01T00:00:00Z"
@@ -302,7 +301,7 @@ Healthcheck должен проверять:
 ```http
 GET  /web/upload
 POST /web/upload
-GET  /web/gallery/{user_email}
+GET  /web/gallery/{user_id}
 ```
 
 Веб-интерфейс должен включать:
@@ -431,9 +430,10 @@ CREATE INDEX idx_outbox_events_pending_created_at
     WHERE status = 'pending';
 ```
 
-Email используется как публичный ключ поиска avatar. Внутри системы email
-сначала сопоставляется с записью `users`, после чего вся работа с avatar и S3
-идет через стабильный UUID из `users.id`.
+Текущие защищенные API работают с внутренним UUID пользователя из `users.id`.
+Email хранится как атрибут пользователя и может использоваться позже для
+отдельного публичного lookup avatar, но не участвует в upload/delete/list
+контрактах.
 
 После успешной загрузки original в S3 запись `avatars` и событие
 `outbox_events` создаются в одной транзакции. API делает best-effort publish в
@@ -450,7 +450,6 @@ Worker периодически публикует pending outbox события
 type AvatarProcessEvent struct {
     AvatarID          string `json:"avatar_id"`
     UserID            string `json:"user_id"`
-    Email             string `json:"email"`
     OriginalObjectKey string `json:"original_object_key"`
     Thumb100ObjectKey string `json:"thumb_100_object_key"`
     Thumb300ObjectKey string `json:"thumb_300_object_key"`

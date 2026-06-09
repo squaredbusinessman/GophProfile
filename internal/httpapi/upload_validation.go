@@ -7,7 +7,6 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/http"
-	"net/mail"
 	"strings"
 )
 
@@ -15,11 +14,10 @@ const (
 	MaxAvatarFileSize       int64 = 10 * 1024 * 1024
 	avatarUploadMemoryLimit int64 = 1 * 1024 * 1024
 	avatarUploadBodyLimit   int64 = MaxAvatarFileSize + avatarUploadMemoryLimit
-	maxUserEmailLength            = 254
 )
 
 type ValidatedAvatarUpload struct {
-	UserEmail   string
+	UserID      string
 	FileName    string
 	ContentType string
 	Size        int64
@@ -56,7 +54,7 @@ func (u *ValidatedAvatarUpload) Close() error {
 
 // ValidateAvatarUploadRequest проверяет запрос загрузки avatar до обращения к S3
 func ValidateAvatarUploadRequest(w http.ResponseWriter, req *http.Request) (*ValidatedAvatarUpload, error) {
-	userEmail, err := validateUserEmail(req.Header.Get("X-User-ID"))
+	userID, err := validateRequesterUserID(req.Header.Get("X-User-ID"))
 	if err != nil {
 		return nil, err
 	}
@@ -94,42 +92,13 @@ func ValidateAvatarUploadRequest(w http.ResponseWriter, req *http.Request) (*Val
 	}
 
 	return &ValidatedAvatarUpload{
-		UserEmail:   userEmail,
+		UserID:      userID,
 		FileName:    fileHeader.Filename,
 		ContentType: contentType,
 		Size:        fileHeader.Size,
 		FileHeader:  fileHeader,
 		form:        req.MultipartForm,
 	}, nil
-}
-
-// validateUserEmail проверяет что X-User-ID содержит email пользователя
-func validateUserEmail(rawUserEmail string) (string, error) {
-	userEmail := strings.ToLower(strings.TrimSpace(rawUserEmail))
-	if userEmail == "" {
-		return "", validationError(http.StatusBadRequest, "Missing X-User-ID", "Header X-User-ID with user email is required")
-	}
-	if len(userEmail) > maxUserEmailLength {
-		return "", validationError(http.StatusBadRequest, "Invalid X-User-ID", "Email is too long")
-	}
-	if strings.ContainsAny(userEmail, " \t\r\n") {
-		return "", validationError(http.StatusBadRequest, "Invalid X-User-ID", "Header X-User-ID must contain a single email")
-	}
-
-	address, err := mail.ParseAddress(userEmail)
-	if err != nil || address.Address != userEmail {
-		return "", validationError(http.StatusBadRequest, "Invalid X-User-ID", "Header X-User-ID must contain a valid email")
-	}
-
-	local, domain, ok := strings.Cut(userEmail, "@")
-	if !ok || local == "" || domain == "" || !strings.Contains(domain, ".") {
-		return "", validationError(http.StatusBadRequest, "Invalid X-User-ID", "Header X-User-ID must contain a valid email")
-	}
-	if strings.HasPrefix(domain, ".") || strings.HasSuffix(domain, ".") || strings.Contains(domain, "..") {
-		return "", validationError(http.StatusBadRequest, "Invalid X-User-ID", "Header X-User-ID must contain a valid email")
-	}
-
-	return userEmail, nil
 }
 
 // parseMultipartError мапит ошибку multipart parsing в ошибку API

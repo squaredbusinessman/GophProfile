@@ -6,13 +6,12 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 )
 
 // TestValidateAvatarUploadAcceptsJPEG проверяет успешную валидацию JPEG
 func TestValidateAvatarUploadAcceptsJPEG(t *testing.T) {
-	req := avatarUploadRequest(t, "User+Avatar@Example.COM", "file", "avatar.jpg", "image/jpeg", jpegBytes())
+	req := avatarUploadRequest(t, "6F3F3C2D-DF58-4E64-91EA-CDF90F4C9C1E", "file", "avatar.jpg", "image/jpeg", jpegBytes())
 	rec := httptest.NewRecorder()
 
 	upload, err := ValidateAvatarUploadRequest(rec, req)
@@ -21,8 +20,8 @@ func TestValidateAvatarUploadAcceptsJPEG(t *testing.T) {
 	}
 	defer upload.Close()
 
-	if upload.UserEmail != "user+avatar@example.com" {
-		t.Fatalf("UserEmail = %q, want normalized email", upload.UserEmail)
+	if upload.UserID != testUserID {
+		t.Fatalf("UserID = %q, want normalized user id", upload.UserID)
 	}
 	if upload.FileName != "avatar.jpg" {
 		t.Fatalf("FileName = %q, want avatar.jpg", upload.FileName)
@@ -37,7 +36,7 @@ func TestValidateAvatarUploadAcceptsJPEG(t *testing.T) {
 
 // TestValidateAvatarUploadAcceptsPNG проверяет успешную валидацию PNG
 func TestValidateAvatarUploadAcceptsPNG(t *testing.T) {
-	req := avatarUploadRequest(t, "user@example.com", "file", "avatar.png", "image/png", pngBytes())
+	req := avatarUploadRequest(t, testUserID, "file", "avatar.png", "image/png", pngBytes())
 	rec := httptest.NewRecorder()
 
 	upload, err := ValidateAvatarUploadRequest(rec, req)
@@ -53,7 +52,7 @@ func TestValidateAvatarUploadAcceptsPNG(t *testing.T) {
 
 // TestValidateAvatarUploadAcceptsWebP проверяет успешную валидацию WebP
 func TestValidateAvatarUploadAcceptsWebP(t *testing.T) {
-	req := avatarUploadRequest(t, "user@example.com", "file", "avatar.webp", "image/webp", webpBytes())
+	req := avatarUploadRequest(t, testUserID, "file", "avatar.webp", "image/webp", webpBytes())
 	rec := httptest.NewRecorder()
 
 	upload, err := ValidateAvatarUploadRequest(rec, req)
@@ -67,8 +66,8 @@ func TestValidateAvatarUploadAcceptsWebP(t *testing.T) {
 	}
 }
 
-// TestValidateAvatarUploadRequiresUserEmail проверяет обязательный X-User-ID
-func TestValidateAvatarUploadRequiresUserEmail(t *testing.T) {
+// TestValidateAvatarUploadRequiresUserID проверяет обязательный X-User-ID
+func TestValidateAvatarUploadRequiresUserID(t *testing.T) {
 	req := avatarUploadRequest(t, "", "file", "avatar.jpg", "image/jpeg", jpegBytes())
 	rec := httptest.NewRecorder()
 
@@ -76,8 +75,8 @@ func TestValidateAvatarUploadRequiresUserEmail(t *testing.T) {
 	assertValidationError(t, err, http.StatusBadRequest, "Missing X-User-ID")
 }
 
-// TestValidateAvatarUploadRejectsInvalidUserEmail проверяет формат email в X-User-ID
-func TestValidateAvatarUploadRejectsInvalidUserEmail(t *testing.T) {
+// TestValidateAvatarUploadRejectsInvalidUserID проверяет формат UUID в X-User-ID
+func TestValidateAvatarUploadRejectsInvalidUserID(t *testing.T) {
 	req := avatarUploadRequest(t, "bad/user", "file", "avatar.jpg", "image/jpeg", jpegBytes())
 	rec := httptest.NewRecorder()
 
@@ -85,18 +84,9 @@ func TestValidateAvatarUploadRejectsInvalidUserEmail(t *testing.T) {
 	assertValidationError(t, err, http.StatusBadRequest, "Invalid X-User-ID")
 }
 
-// TestValidateAvatarUploadRejectsEmailWithoutDomainDot проверяет домен email
-func TestValidateAvatarUploadRejectsEmailWithoutDomainDot(t *testing.T) {
-	req := avatarUploadRequest(t, "user@example", "file", "avatar.jpg", "image/jpeg", jpegBytes())
-	rec := httptest.NewRecorder()
-
-	_, err := ValidateAvatarUploadRequest(rec, req)
-	assertValidationError(t, err, http.StatusBadRequest, "Invalid X-User-ID")
-}
-
-// TestValidateAvatarUploadRejectsLongUserEmail проверяет длину email в X-User-ID
-func TestValidateAvatarUploadRejectsLongUserEmail(t *testing.T) {
-	req := avatarUploadRequest(t, strings.Repeat("a", maxUserEmailLength)+"@example.com", "file", "avatar.jpg", "image/jpeg", jpegBytes())
+// TestValidateAvatarUploadRejectsMalformedUserID проверяет некорректный UUID
+func TestValidateAvatarUploadRejectsMalformedUserID(t *testing.T) {
+	req := avatarUploadRequest(t, "00000000-0000-0000-0000-not-a-uuid", "file", "avatar.jpg", "image/jpeg", jpegBytes())
 	rec := httptest.NewRecorder()
 
 	_, err := ValidateAvatarUploadRequest(rec, req)
@@ -105,7 +95,7 @@ func TestValidateAvatarUploadRejectsLongUserEmail(t *testing.T) {
 
 // TestValidateAvatarUploadRequiresFile проверяет обязательное поле file
 func TestValidateAvatarUploadRequiresFile(t *testing.T) {
-	req := avatarUploadRequest(t, "user@example.com", "image", "avatar.jpg", "image/jpeg", jpegBytes())
+	req := avatarUploadRequest(t, testUserID, "image", "avatar.jpg", "image/jpeg", jpegBytes())
 	rec := httptest.NewRecorder()
 
 	_, err := ValidateAvatarUploadRequest(rec, req)
@@ -114,7 +104,7 @@ func TestValidateAvatarUploadRequiresFile(t *testing.T) {
 
 // TestValidateAvatarUploadRejectsEmptyFile проверяет отказ для пустого файла
 func TestValidateAvatarUploadRejectsEmptyFile(t *testing.T) {
-	req := avatarUploadRequest(t, "user@example.com", "file", "avatar.jpg", "image/jpeg", nil)
+	req := avatarUploadRequest(t, testUserID, "file", "avatar.jpg", "image/jpeg", nil)
 	rec := httptest.NewRecorder()
 
 	_, err := ValidateAvatarUploadRequest(rec, req)
@@ -123,7 +113,7 @@ func TestValidateAvatarUploadRejectsEmptyFile(t *testing.T) {
 
 // TestValidateAvatarUploadRejectsUnsupportedMIME проверяет отказ для неподдержанного MIME
 func TestValidateAvatarUploadRejectsUnsupportedMIME(t *testing.T) {
-	req := avatarUploadRequest(t, "user@example.com", "file", "avatar.gif", "image/gif", []byte("GIF89a"))
+	req := avatarUploadRequest(t, testUserID, "file", "avatar.gif", "image/gif", []byte("GIF89a"))
 	rec := httptest.NewRecorder()
 
 	_, err := ValidateAvatarUploadRequest(rec, req)
@@ -132,7 +122,7 @@ func TestValidateAvatarUploadRejectsUnsupportedMIME(t *testing.T) {
 
 // TestValidateAvatarUploadRejectsMIMEMagicMismatch проверяет совпадение MIME и magic bytes
 func TestValidateAvatarUploadRejectsMIMEMagicMismatch(t *testing.T) {
-	req := avatarUploadRequest(t, "user@example.com", "file", "avatar.png", "image/png", jpegBytes())
+	req := avatarUploadRequest(t, testUserID, "file", "avatar.png", "image/png", jpegBytes())
 	rec := httptest.NewRecorder()
 
 	_, err := ValidateAvatarUploadRequest(rec, req)
@@ -141,7 +131,7 @@ func TestValidateAvatarUploadRejectsMIMEMagicMismatch(t *testing.T) {
 
 // TestValidateAvatarUploadRejectsInvalidMagicBytes проверяет отказ для неверных magic bytes
 func TestValidateAvatarUploadRejectsInvalidMagicBytes(t *testing.T) {
-	req := avatarUploadRequest(t, "user@example.com", "file", "avatar.jpg", "image/jpeg", []byte("not-image"))
+	req := avatarUploadRequest(t, testUserID, "file", "avatar.jpg", "image/jpeg", []byte("not-image"))
 	rec := httptest.NewRecorder()
 
 	_, err := ValidateAvatarUploadRequest(rec, req)
@@ -151,7 +141,7 @@ func TestValidateAvatarUploadRejectsInvalidMagicBytes(t *testing.T) {
 // TestValidateAvatarUploadRejectsTooLargeFile проверяет отказ для файла больше 10MB
 func TestValidateAvatarUploadRejectsTooLargeFile(t *testing.T) {
 	data := append(jpegBytes(), bytes.Repeat([]byte{0}, int(MaxAvatarFileSize))...)
-	req := avatarUploadRequest(t, "user@example.com", "file", "avatar.jpg", "image/jpeg", data)
+	req := avatarUploadRequest(t, testUserID, "file", "avatar.jpg", "image/jpeg", data)
 	rec := httptest.NewRecorder()
 
 	_, err := ValidateAvatarUploadRequest(rec, req)
@@ -161,7 +151,7 @@ func TestValidateAvatarUploadRejectsTooLargeFile(t *testing.T) {
 // TestValidateAvatarUploadRejectsTooLargeBodyBeforeParse проверяет ограничение всего multipart body
 func TestValidateAvatarUploadRejectsTooLargeBodyBeforeParse(t *testing.T) {
 	data := append(jpegBytes(), bytes.Repeat([]byte{0}, int(avatarUploadBodyLimit))...)
-	req := avatarUploadRequest(t, "user@example.com", "file", "avatar.jpg", "image/jpeg", data)
+	req := avatarUploadRequest(t, testUserID, "file", "avatar.jpg", "image/jpeg", data)
 	rec := httptest.NewRecorder()
 
 	_, err := ValidateAvatarUploadRequest(rec, req)
@@ -169,7 +159,7 @@ func TestValidateAvatarUploadRejectsTooLargeBodyBeforeParse(t *testing.T) {
 }
 
 // avatarUploadRequest создает multipart request для тестов загрузки avatar
-func avatarUploadRequest(t *testing.T, userEmail string, fieldName string, fileName string, contentType string, data []byte) *http.Request {
+func avatarUploadRequest(t *testing.T, userID string, fieldName string, fileName string, contentType string, data []byte) *http.Request {
 	t.Helper()
 
 	var body bytes.Buffer
@@ -190,8 +180,8 @@ func avatarUploadRequest(t *testing.T, userEmail string, fieldName string, fileN
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/avatars", &body)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
-	if userEmail != "" {
-		req.Header.Set("X-User-ID", userEmail)
+	if userID != "" {
+		req.Header.Set("X-User-ID", userID)
 	}
 	return req
 }

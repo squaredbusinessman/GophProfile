@@ -22,10 +22,10 @@ document.querySelector('#app').innerHTML = `
 
         <form class="panel__body form" id="uploadForm">
           <label class="field">
-            <span class="field__label">Email пользователя</span>
-            <input class="input" id="uploadUserEmail" name="user_email" type="email" autocomplete="email" required
-              placeholder="user@example.com">
-            <span class="field__hint">Используется как значение header X-User-ID</span>
+            <span class="field__label">User ID</span>
+            <input class="input" id="uploadUserID" name="user_id" type="text" autocomplete="off" required
+              placeholder="6f3f3c2d-df58-4e64-91ea-cdf90f4c9c1e">
+            <span class="field__hint">Внутренний UUID пользователя для header X-User-ID</span>
           </label>
 
           <label class="field">
@@ -70,7 +70,7 @@ document.querySelector('#app').innerHTML = `
               <button class="button button--secondary" id="loadGalleryButton" type="button">Обновить</button>
             </div>
             <div class="avatar-list" id="avatarList">
-              <div class="empty-state">Загрузите аватарку или укажите email</div>
+              <div class="empty-state">Загрузите аватарку или укажите user_id</div>
             </div>
           </section>
 
@@ -84,7 +84,7 @@ document.querySelector('#app').innerHTML = `
 `;
 
 const uploadForm = document.querySelector('#uploadForm');
-const uploadUserEmail = document.querySelector('#uploadUserEmail');
+const uploadUserID = document.querySelector('#uploadUserID');
 const avatarFile = document.querySelector('#avatarFile');
 const uploadButton = document.querySelector('#uploadButton');
 const resetButton = document.querySelector('#resetButton');
@@ -138,12 +138,12 @@ uploadForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   hideNotice();
 
-  const userEmail = normalizeEmail(uploadUserEmail.value);
+  const userID = normalizeUserID(uploadUserID.value);
   const file = avatarFile.files[0];
 
-  const emailError = validateEmail(userEmail);
-  if (emailError) {
-    showNotice(emailError, 'error');
+  const userIDError = validateUserID(userID);
+  if (userIDError) {
+    showNotice(userIDError, 'error');
     return;
   }
 
@@ -166,7 +166,7 @@ uploadForm.addEventListener('submit', async (event) => {
     const response = await fetch('/api/v1/avatars', {
       method: 'POST',
       headers: {
-        'X-User-ID': userEmail
+        'X-User-ID': userID
       },
       body: formData
     });
@@ -181,11 +181,9 @@ uploadForm.addEventListener('submit', async (event) => {
     }
 
     showNotice('Аватарка отправлена на обработку', 'success');
-    galleryUserID.value = data?.user_id || '';
+    galleryUserID.value = data?.user_id || userID;
     activateTab('gallery');
-    if (data?.user_id) {
-      await loadGallery(data.user_id);
-    }
+    await loadGallery(data?.user_id || userID);
   } catch (error) {
     showNotice(`Ошибка сети: ${error.message}`, 'error');
   } finally {
@@ -250,7 +248,6 @@ function renderGallery(avatars) {
   avatars.forEach((avatar) => {
     const id = avatar.id || avatar.avatar_id;
     const userID = avatar.user_id || galleryUserID.value.trim();
-    const ownerEmail = avatar.email || avatar.user_email || uploadUserEmail.value.trim();
     const imageUrl = avatar.url || `/api/v1/avatars/${encodeURIComponent(id)}?size=100x100`;
     const card = document.createElement('article');
     const image = document.createElement('img');
@@ -277,7 +274,6 @@ function renderGallery(avatars) {
     title.textContent = id || 'Без ID';
     meta.textContent = [
       userID ? `user_id: ${userID}` : null,
-      ownerEmail ? `email: ${ownerEmail}` : null,
       avatar.status ? `status: ${avatar.status}` : null,
       avatar.processing_status ? `processing: ${avatar.processing_status}` : null
     ].filter(Boolean).join(', ');
@@ -339,12 +335,8 @@ async function deleteAvatar(avatarId, userID) {
   }
 }
 
-function normalizeEmail(value) {
-  return value.trim().toLowerCase();
-}
-
 function normalizeUserID(value) {
-  return value.trim();
+  return value.trim().toLowerCase();
 }
 
 function validateUserID(value) {
@@ -352,24 +344,8 @@ function validateUserID(value) {
     return 'Укажите user_id пользователя';
   }
 
-  if (!/^[0-9a-fA-F-]{36}$/.test(value)) {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value)) {
     return 'User ID должен быть UUID из ответа API';
-  }
-
-  return '';
-}
-
-function validateEmail(value) {
-  if (!value) {
-    return 'Укажите email пользователя';
-  }
-
-  if (value.length > 254) {
-    return 'Email не должен быть длиннее 254 символов';
-  }
-
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
-    return 'Укажите корректный email';
   }
 
   return '';

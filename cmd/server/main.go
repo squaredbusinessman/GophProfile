@@ -47,10 +47,9 @@ func main() {
 	}
 	defer kafkaClient.Close()
 
-	userRepo := postgres.NewUserRepository(db)
 	outboxRepo := postgres.NewOutboxRepository(db)
 	avatarRepo := postgres.NewAvatarRepository(db)
-	avatarUploadService := app.NewAvatarUploadService(userRepo, outboxRepo, s3Client, kafkaClient)
+	avatarUploadService := app.NewAvatarUploadService(outboxRepo, s3Client, kafkaClient)
 	avatarReadService := app.NewAvatarReadService(avatarRepo, s3Client)
 	avatarDeleteService := app.NewAvatarDeleteService(avatarRepo, outboxRepo, kafkaClient)
 
