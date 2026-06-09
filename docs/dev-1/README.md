@@ -118,7 +118,7 @@ file: binary
 
 ```http
 GET /api/v1/avatars/{avatar_id}
-GET /api/v1/users/{user_email}/avatar
+GET /api/v1/users/{user_id}/avatar
 ```
 
 Query-параметры опционально:
@@ -128,10 +128,17 @@ size: string, values: "100x100", "300x300", "original"
 format: string, values: "jpeg", "png", "webp"
 ```
 
+`size` поддерживается для `original`, `100x100` и `300x300`. Если thumbnail еще
+не готов, API возвращает `409 Avatar is still processing`.
+
+`format` в MVP не выполняет конвертацию. Запрос разрешен только когда
+запрошенный формат совпадает с фактически сохраненным MIME объекта. Иначе API
+возвращает `400 Unsupported avatar format`.
+
 Пример:
 
 ```http
-GET /api/v1/avatars/{avatar_id}?size=300x300&format=webp
+GET /api/v1/avatars/{avatar_id}?size=300x300&format=png
 ```
 
 Ответ `200`:
@@ -153,6 +160,14 @@ ETag: "hash"
 ```json
 {
   "error": "Avatar not found"
+}
+```
+
+Ответ `409`:
+
+```json
+{
+  "error": "Avatar is still processing"
 }
 ```
 

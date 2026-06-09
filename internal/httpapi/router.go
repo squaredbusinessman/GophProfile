@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	_ "image/jpeg"
@@ -11,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -25,6 +27,7 @@ type RouterConfig struct {
 	Version        string
 	Logger         zerolog.Logger
 	AvatarUploader AvatarUploader
+	AvatarReader   AvatarReader
 }
 
 type Router struct {
@@ -32,11 +35,17 @@ type Router struct {
 	version        string
 	logger         zerolog.Logger
 	avatarUploader AvatarUploader
+	avatarReader   AvatarReader
 	mux            *http.ServeMux
 }
 
 type AvatarUploader interface {
 	UploadAvatar(ctx context.Context, req app.AvatarUploadRequest) (app.AvatarUploadResult, error)
+}
+
+type AvatarReader interface {
+	GetAvatarByID(ctx context.Context, avatarID string, size string, format string) (app.AvatarReadResult, error)
+	GetLatestAvatarByUserID(ctx context.Context, userID string, size string, format string) (app.AvatarReadResult, error)
 }
 
 // NewRouter создает HTTP router приложения
@@ -46,11 +55,14 @@ func NewRouter(cfg RouterConfig) http.Handler {
 		version:        cfg.Version,
 		logger:         cfg.Logger,
 		avatarUploader: cfg.AvatarUploader,
+		avatarReader:   cfg.AvatarReader,
 		mux:            http.NewServeMux(),
 	}
 
 	router.mux.HandleFunc("/health", router.handleHealth)
 	router.mux.HandleFunc("/api/v1/avatars", router.handleAvatars)
+	router.mux.HandleFunc("/api/v1/avatars/", router.handleAvatarByID)
+	router.mux.HandleFunc("/api/v1/users/", router.handleUsers)
 
 	return router
 }
@@ -191,6 +203,67 @@ func (r *Router) handleAvatarUpload(w http.ResponseWriter, req *http.Request) {
 	})
 }
 
+// handleAvatarByID обрабатывает GET avatar по avatar id
+func (r *Router) handleAvatarByID(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{
+			"error": "method not allowed",
+		})
+		return
+	}
+
+	avatarID := strings.TrimPrefix(req.URL.Path, "/api/v1/avatars/")
+	if avatarID == "" || strings.Contains(avatarID, "/") {
+		writeJSON(w, http.StatusNotFound, map[string]string{
+			"error": "Avatar not found",
+		})
+		return
+	}
+
+	result, err := r.avatarReaderResult(req, func(ctx context.Context, size string, format string) (app.AvatarReadResult, error) {
+		return r.avatarReader.GetAvatarByID(ctx, avatarID, size, format)
+	})
+	if err != nil {
+		writeAvatarReadError(w, err)
+		return
+	}
+	defer result.Body.Close()
+
+	writeAvatarBinary(w, result)
+}
+
+// handleUsers обрабатывает user-scoped API routes
+func (r *Router) handleUsers(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{
+			"error": "method not allowed",
+		})
+		return
+	}
+
+	suffix := strings.TrimPrefix(req.URL.Path, "/api/v1/users/")
+	userID, ok := strings.CutSuffix(suffix, "/avatar")
+	if !ok || userID == "" || strings.Contains(userID, "/") {
+		writeJSON(w, http.StatusNotFound, map[string]string{
+			"error": "Avatar not found",
+		})
+		return
+	}
+
+	result, err := r.avatarReaderResult(req, func(ctx context.Context, size string, format string) (app.AvatarReadResult, error) {
+		return r.avatarReader.GetLatestAvatarByUserID(ctx, userID, size, format)
+	})
+	if err != nil {
+		writeAvatarReadError(w, err)
+		return
+	}
+	defer result.Body.Close()
+
+	writeAvatarBinary(w, result)
+}
+
 type HealthResponse struct {
 	Status    string            `json:"status"`
 	Service   string            `json:"service"`
@@ -208,6 +281,45 @@ type AvatarUploadResponse struct {
 	Width     int       `json:"width,omitempty"`
 	Height    int       `json:"height,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
+}
+
+// avatarReaderResult вызывает reader с query параметрами запроса
+func (r *Router) avatarReaderResult(req *http.Request, read func(context.Context, string, string) (app.AvatarReadResult, error)) (app.AvatarReadResult, error) {
+	if r.avatarReader == nil {
+		return app.AvatarReadResult{}, fmt.Errorf("avatar reader is not configured")
+	}
+	query := req.URL.Query()
+	return read(req.Context(), query.Get("size"), query.Get("format"))
+}
+
+// writeAvatarReadError записывает HTTP-ответ для ошибки чтения avatar
+func writeAvatarReadError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, app.ErrAvatarNotFound):
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Avatar not found"})
+	case errors.Is(err, app.ErrAvatarProcessing):
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "Avatar is still processing"})
+	case errors.Is(err, app.ErrUnsupportedAvatarSize):
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Unsupported avatar size"})
+	case errors.Is(err, app.ErrUnsupportedAvatarFormat):
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Unsupported avatar format"})
+	default:
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Avatar read failed"})
+	}
+}
+
+// writeAvatarBinary записывает binary avatar response
+func writeAvatarBinary(w http.ResponseWriter, result app.AvatarReadResult) {
+	w.Header().Set("Content-Type", result.ContentType)
+	w.Header().Set("Cache-Control", "max-age=86400")
+	if result.ETag != "" {
+		w.Header().Set("ETag", result.ETag)
+	}
+	if result.Size > 0 {
+		w.Header().Set("Content-Length", strconv.FormatInt(result.Size, 10))
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.Copy(w, result.Body)
 }
 
 // writeValidationError записывает HTTP-ответ для ошибки валидации

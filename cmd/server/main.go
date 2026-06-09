@@ -49,13 +49,16 @@ func main() {
 
 	userRepo := postgres.NewUserRepository(db)
 	outboxRepo := postgres.NewOutboxRepository(db)
+	avatarRepo := postgres.NewAvatarRepository(db)
 	avatarUploadService := app.NewAvatarUploadService(userRepo, outboxRepo, s3Client, kafkaClient)
+	avatarReadService := app.NewAvatarReadService(avatarRepo, s3Client)
 
 	router := httpapi.NewRouter(httpapi.RouterConfig{
 		ServiceName:    cfg.ServiceName,
 		Version:        cfg.Version,
 		Logger:         logger,
 		AvatarUploader: avatarUploadService,
+		AvatarReader:   avatarReadService,
 	})
 
 	if err := app.RunHTTPServer(ctx, cfg, router, logger); err != nil {
