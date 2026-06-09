@@ -294,8 +294,8 @@ function renderGallery(avatars) {
 
     deleteButton.type = 'button';
     deleteButton.textContent = 'Удалить';
-    deleteButton.disabled = !id || !ownerEmail;
-    deleteButton.addEventListener('click', () => deleteAvatar(id, ownerEmail));
+    deleteButton.disabled = !id || !userID;
+    deleteButton.addEventListener('click', () => deleteAvatar(id, userID));
 
     actions.append(metadataButton, openButton, deleteButton);
     content.append(title, meta, actions);
@@ -316,12 +316,12 @@ async function loadMetadata(avatarId) {
   activateTab('response');
 }
 
-async function deleteAvatar(avatarId, userEmail) {
+async function deleteAvatar(avatarId, userID) {
   try {
     const response = await fetch(`/api/v1/avatars/${encodeURIComponent(avatarId)}`, {
       method: 'DELETE',
       headers: {
-        'X-User-ID': userEmail
+        'X-User-ID': userID
       }
     });
     const data = await readResponse(response);
@@ -329,7 +329,7 @@ async function deleteAvatar(avatarId, userEmail) {
     renderApiResponse(response, data || { status: 'deleted' });
 
     if (response.ok) {
-      await loadGallery(userEmail);
+      await loadGallery(userID);
     } else {
       activateTab('response');
     }

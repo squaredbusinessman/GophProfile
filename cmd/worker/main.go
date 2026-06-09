@@ -50,8 +50,9 @@ func main() {
 	outboxRepo := postgres.NewOutboxRepository(db)
 	outboxPublisher := app.NewOutboxPublisherService(outboxRepo, kafkaClient)
 	avatarProcessor := app.NewAvatarProcessService(avatarRepo, s3Client, kafkaClient)
+	avatarDeleter := app.NewAvatarDeleteWorkerService(avatarRepo, s3Client)
 
-	if err := app.RunWorker(ctx, cfg, logger, outboxPublisher, kafkaClient, avatarProcessor); err != nil {
+	if err := app.RunWorker(ctx, cfg, logger, outboxPublisher, kafkaClient, avatarProcessor, avatarDeleter); err != nil {
 		if !errors.Is(err, context.Canceled) {
 			logger.Fatal().Err(err).Msg("worker stopped with error")
 		}

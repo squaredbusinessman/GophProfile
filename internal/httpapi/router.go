@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 	"github.com/squaredbusinessman/GophProfile/internal/app"
 	"github.com/squaredbusinessman/GophProfile/internal/domain/avatar"
@@ -29,6 +30,7 @@ type RouterConfig struct {
 	Logger         zerolog.Logger
 	AvatarUploader AvatarUploader
 	AvatarReader   AvatarReader
+	AvatarDeleter  AvatarDeleter
 }
 
 type Router struct {
@@ -37,6 +39,7 @@ type Router struct {
 	logger         zerolog.Logger
 	avatarUploader AvatarUploader
 	avatarReader   AvatarReader
+	avatarDeleter  AvatarDeleter
 	mux            *http.ServeMux
 }
 
@@ -51,6 +54,11 @@ type AvatarReader interface {
 	ListAvatarsByUserID(ctx context.Context, userID string, limit int, offset int) (app.AvatarListResult, error)
 }
 
+type AvatarDeleter interface {
+	DeleteAvatarByID(ctx context.Context, avatarID string, requesterUserID string) error
+	DeleteLatestAvatarByUserID(ctx context.Context, targetUserID string, requesterUserID string) error
+}
+
 // NewRouter создает HTTP router приложения
 func NewRouter(cfg RouterConfig) http.Handler {
 	router := &Router{
@@ -59,6 +67,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 		logger:         cfg.Logger,
 		avatarUploader: cfg.AvatarUploader,
 		avatarReader:   cfg.AvatarReader,
+		avatarDeleter:  cfg.AvatarDeleter,
 		mux:            http.NewServeMux(),
 	}
 
@@ -208,8 +217,8 @@ func (r *Router) handleAvatarUpload(w http.ResponseWriter, req *http.Request) {
 
 // handleAvatarByID обрабатывает GET avatar по avatar id
 func (r *Router) handleAvatarByID(w http.ResponseWriter, req *http.Request) {
-	if req.Method != http.MethodGet {
-		w.Header().Set("Allow", http.MethodGet)
+	if req.Method != http.MethodGet && req.Method != http.MethodDelete {
+		w.Header().Set("Allow", strings.Join([]string{http.MethodGet, http.MethodDelete}, ", "))
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{
 			"error": "method not allowed",
 		})
@@ -218,6 +227,13 @@ func (r *Router) handleAvatarByID(w http.ResponseWriter, req *http.Request) {
 
 	avatarPath := strings.TrimPrefix(req.URL.Path, "/api/v1/avatars/")
 	if strings.HasSuffix(avatarPath, "/metadata") {
+		if req.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{
+				"error": "method not allowed",
+			})
+			return
+		}
 		avatarID := strings.TrimSuffix(avatarPath, "/metadata")
 		if avatarID == "" || strings.Contains(avatarID, "/") {
 			writeJSON(w, http.StatusNotFound, map[string]string{
@@ -237,6 +253,11 @@ func (r *Router) handleAvatarByID(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	if req.Method == http.MethodDelete {
+		r.handleAvatarDeleteByID(w, req, avatarID)
+		return
+	}
+
 	result, err := r.avatarReaderResult(req, func(ctx context.Context, size string, format string) (app.AvatarReadResult, error) {
 		return r.avatarReader.GetAvatarByID(ctx, avatarID, size, format)
 	})
@@ -247,6 +268,29 @@ func (r *Router) handleAvatarByID(w http.ResponseWriter, req *http.Request) {
 	defer result.Body.Close()
 
 	writeAvatarBinary(w, result)
+}
+
+// handleAvatarDeleteByID удаляет avatar по id
+func (r *Router) handleAvatarDeleteByID(w http.ResponseWriter, req *http.Request, avatarID string) {
+	if r.avatarDeleter == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "avatar delete is not configured",
+		})
+		return
+	}
+
+	requesterUserID, err := validateRequesterUserID(req.Header.Get("X-User-ID"))
+	if err != nil {
+		writeValidationError(w, err)
+		return
+	}
+
+	if err := r.avatarDeleter.DeleteAvatarByID(req.Context(), avatarID, requesterUserID); err != nil {
+		writeAvatarDeleteError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // handleAvatarMetadata возвращает JSON metadata avatar
@@ -269,8 +313,8 @@ func (r *Router) handleAvatarMetadata(w http.ResponseWriter, req *http.Request, 
 
 // handleUsers обрабатывает user-scoped API routes
 func (r *Router) handleUsers(w http.ResponseWriter, req *http.Request) {
-	if req.Method != http.MethodGet {
-		w.Header().Set("Allow", http.MethodGet)
+	if req.Method != http.MethodGet && req.Method != http.MethodDelete {
+		w.Header().Set("Allow", strings.Join([]string{http.MethodGet, http.MethodDelete}, ", "))
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{
 			"error": "method not allowed",
 		})
@@ -279,6 +323,13 @@ func (r *Router) handleUsers(w http.ResponseWriter, req *http.Request) {
 
 	suffix := strings.TrimPrefix(req.URL.Path, "/api/v1/users/")
 	if strings.HasSuffix(suffix, "/avatars") {
+		if req.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{
+				"error": "method not allowed",
+			})
+			return
+		}
 		userID := strings.TrimSuffix(suffix, "/avatars")
 		if userID == "" || strings.Contains(userID, "/") {
 			writeJSON(w, http.StatusNotFound, map[string]string{
@@ -298,6 +349,11 @@ func (r *Router) handleUsers(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	if req.Method == http.MethodDelete {
+		r.handleLatestAvatarDeleteByUser(w, req, userID)
+		return
+	}
+
 	result, err := r.avatarReaderResult(req, func(ctx context.Context, size string, format string) (app.AvatarReadResult, error) {
 		return r.avatarReader.GetLatestAvatarByUserID(ctx, userID, size, format)
 	})
@@ -308,6 +364,29 @@ func (r *Router) handleUsers(w http.ResponseWriter, req *http.Request) {
 	defer result.Body.Close()
 
 	writeAvatarBinary(w, result)
+}
+
+// handleLatestAvatarDeleteByUser удаляет последнюю активную avatar пользователя
+func (r *Router) handleLatestAvatarDeleteByUser(w http.ResponseWriter, req *http.Request, userID string) {
+	if r.avatarDeleter == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "avatar delete is not configured",
+		})
+		return
+	}
+
+	requesterUserID, err := validateRequesterUserID(req.Header.Get("X-User-ID"))
+	if err != nil {
+		writeValidationError(w, err)
+		return
+	}
+
+	if err := r.avatarDeleter.DeleteLatestAvatarByUserID(req.Context(), userID, requesterUserID); err != nil {
+		writeAvatarDeleteError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // handleUserAvatarList возвращает список активных avatar пользователя
@@ -439,6 +518,18 @@ func writeAvatarReadError(w http.ResponseWriter, err error) {
 	}
 }
 
+// writeAvatarDeleteError записывает HTTP-ответ для ошибки удаления avatar
+func writeAvatarDeleteError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, app.ErrAvatarNotFound):
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Avatar not found"})
+	case errors.Is(err, app.ErrAvatarForbidden):
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden", "details": "You can only delete your own avatars"})
+	default:
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Avatar delete failed"})
+	}
+}
+
 // writeAvatarBinary записывает binary avatar response
 func writeAvatarBinary(w http.ResponseWriter, result app.AvatarReadResult) {
 	w.Header().Set("Content-Type", result.ContentType)
@@ -485,6 +576,19 @@ func writeValidationError(w http.ResponseWriter, err error) {
 		return
 	}
 	writeJSON(w, validationErr.StatusCode, validationErr)
+}
+
+// validateRequesterUserID проверяет что X-User-ID содержит внутренний UUID пользователя
+func validateRequesterUserID(rawUserID string) (string, error) {
+	userID := strings.TrimSpace(rawUserID)
+	if userID == "" {
+		return "", validationError(http.StatusBadRequest, "Missing X-User-ID", "Header X-User-ID with user id is required")
+	}
+	parsed, err := uuid.Parse(userID)
+	if err != nil {
+		return "", validationError(http.StatusBadRequest, "Invalid X-User-ID", "Header X-User-ID must contain user UUID")
+	}
+	return parsed.String(), nil
 }
 
 // writeJSON записывает JSON-ответ с указанным HTTP-статусом

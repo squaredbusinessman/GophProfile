@@ -175,16 +175,20 @@ ETag: "hash"
 
 ```http
 DELETE /api/v1/avatars/{avatar_id}
-DELETE /api/v1/users/{user_email}/avatar
-X-User-ID: email
+DELETE /api/v1/users/{user_id}/avatar
+X-User-ID: uuid
 ```
 
 Требования:
 
-- `X-User-ID` обязателен и должен содержать email пользователя
-- Мягкое удаление в БД
-- Асинхронное удаление из S3
+- `X-User-ID` обязателен и должен содержать внутренний UUID пользователя
+- Мягкое удаление в БД выставляет `deleted_at` и `status = deleting`
+- Событие удаления публикуется в Kafka topic `avatar.delete.v1`
+- Worker асинхронно удаляет original и thumbnails из S3
+- Отсутствующие S3 objects считаются успешным удалением
+- После очистки S3 worker выставляет `status = deleted`
 - Удалять можно только свои аватарки
+- Повторный DELETE по уже удаленной avatar является no-op
 
 Ответ `204`:
 
@@ -455,8 +459,8 @@ type AvatarProcessEvent struct {
 }
 
 type AvatarDeleteEvent struct {
-    AvatarID string   `json:"avatar_id"`
-    S3Keys   []string `json:"s3_keys"`
+    AvatarID string `json:"avatar_id"`
+    UserID   string `json:"user_id"`
 }
 ```
 
@@ -467,6 +471,7 @@ Kafka topics:
 - `avatar.process.retry.5m.v1`
 - `avatar.process.retry.30m.v1`
 - `avatar.process.dead-letter.v1`
+- `avatar.delete.v1`
 
 Требования к идемпотентности:
 

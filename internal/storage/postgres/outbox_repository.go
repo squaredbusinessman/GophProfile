@@ -41,6 +41,39 @@ func (r *OutboxRepository) CreateAvatarWithOutbox(ctx context.Context, item avat
 	return nil
 }
 
+// SoftDeleteAvatarWithOutbox атомарно помечает avatar удаляемой и сохраняет outbox событие
+func (r *OutboxRepository) SoftDeleteAvatarWithOutbox(ctx context.Context, id string, userID string, deletedAt time.Time, event outbox.Event) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin avatar delete outbox transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	result, err := tx.ExecContext(ctx, `
+		UPDATE avatars
+		SET status = $3,
+			deleted_at = $4,
+			updated_at = $4
+		WHERE id = $1
+			AND user_id = $2
+			AND deleted_at IS NULL
+	`, id, userID, string(avatar.StatusDeleting), deletedAt)
+	if err != nil {
+		return fmt.Errorf("soft delete avatar: %w", err)
+	}
+	if err := expectOneAffected(result); err != nil {
+		return err
+	}
+	if err := insertOutboxEvent(ctx, tx, event); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit avatar delete outbox transaction: %w", err)
+	}
+
+	return nil
+}
+
 // MarkOutboxPublished отмечает outbox событие опубликованным
 func (r *OutboxRepository) MarkOutboxPublished(ctx context.Context, id string, publishedAt time.Time) error {
 	result, err := r.db.ExecContext(ctx, `

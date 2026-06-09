@@ -10,16 +10,16 @@ import (
 )
 
 // RunWorker запускает worker и периодически публикует pending outbox события
-func RunWorker(ctx context.Context, cfg config.Config, logger zerolog.Logger, outboxPublisher *OutboxPublisherService, processConsumer ProcessMessageConsumer, avatarProcessor *AvatarProcessService) error {
+func RunWorker(ctx context.Context, cfg config.Config, logger zerolog.Logger, outboxPublisher *OutboxPublisherService, processConsumer ProcessMessageConsumer, avatarProcessor *AvatarProcessService, avatarDeleter *AvatarDeleteWorkerService) error {
 	logger.Info().
 		Strs("kafka_brokers", cfg.Kafka.Brokers).
 		Str("consumer_group", cfg.Kafka.ConsumerGroup).
 		Msg("worker started")
 
 	errCh := make(chan error, 1)
-	if processConsumer != nil && avatarProcessor != nil {
+	if processConsumer != nil && (avatarProcessor != nil || avatarDeleter != nil) {
 		go func() {
-			errCh <- consumeAvatarProcess(ctx, processConsumer, avatarProcessor)
+			errCh <- consumeAvatarMessages(ctx, processConsumer, avatarProcessor, avatarDeleter)
 		}()
 	}
 
@@ -44,15 +44,24 @@ type ProcessMessageConsumer interface {
 	Consume(ctx context.Context, topics []string, handler func(context.Context, queuekafka.Message) error) error
 }
 
-// consumeAvatarProcess читает avatar.process topics и запускает обработчик
-func consumeAvatarProcess(ctx context.Context, consumer ProcessMessageConsumer, processor *AvatarProcessService) error {
-	topics := []string{
-		queuekafka.TopicAvatarProcess,
-		queuekafka.TopicAvatarProcessRetry1m,
-		queuekafka.TopicAvatarProcessRetry5m,
-		queuekafka.TopicAvatarProcessRetry30m,
+// consumeAvatarMessages читает avatar topics и запускает нужный обработчик
+func consumeAvatarMessages(ctx context.Context, consumer ProcessMessageConsumer, processor *AvatarProcessService, deleter *AvatarDeleteWorkerService) error {
+	topics := make([]string, 0, 5)
+	if processor != nil {
+		topics = append(topics,
+			queuekafka.TopicAvatarProcess,
+			queuekafka.TopicAvatarProcessRetry1m,
+			queuekafka.TopicAvatarProcessRetry5m,
+			queuekafka.TopicAvatarProcessRetry30m,
+		)
+	}
+	if deleter != nil {
+		topics = append(topics, queuekafka.TopicAvatarDelete)
 	}
 	return consumer.Consume(ctx, topics, func(ctx context.Context, message queuekafka.Message) error {
+		if message.Topic == queuekafka.TopicAvatarDelete {
+			return deleter.HandleDeleteMessage(ctx, message.Value)
+		}
 		return processor.HandleProcessMessage(ctx, message.Value)
 	})
 }

@@ -52,6 +52,7 @@ func main() {
 	avatarRepo := postgres.NewAvatarRepository(db)
 	avatarUploadService := app.NewAvatarUploadService(userRepo, outboxRepo, s3Client, kafkaClient)
 	avatarReadService := app.NewAvatarReadService(avatarRepo, s3Client)
+	avatarDeleteService := app.NewAvatarDeleteService(avatarRepo, outboxRepo, kafkaClient)
 
 	router := httpapi.NewRouter(httpapi.RouterConfig{
 		ServiceName:    cfg.ServiceName,
@@ -59,6 +60,7 @@ func main() {
 		Logger:         logger,
 		AvatarUploader: avatarUploadService,
 		AvatarReader:   avatarReadService,
+		AvatarDeleter:  avatarDeleteService,
 	})
 
 	if err := app.RunHTTPServer(ctx, cfg, router, logger); err != nil {

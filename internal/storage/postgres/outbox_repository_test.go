@@ -83,6 +83,58 @@ func TestCreateAvatarWithOutboxWritesBothRecordsInTransaction(t *testing.T) {
 	assertExpectations(t, mock)
 }
 
+// TestSoftDeleteAvatarWithOutboxWritesBothRecordsInTransaction проверяет атомарный soft delete и outbox
+func TestSoftDeleteAvatarWithOutboxWritesBothRecordsInTransaction(t *testing.T) {
+	db, mock := newMockDB(t)
+	repo := NewOutboxRepository(db)
+	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
+
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE avatars")).
+		WithArgs(
+			"4a992fa3-df1a-4b5f-b764-546e99643eb0",
+			"6f3f3c2d-df58-4e64-91ea-cdf90f4c9c1e",
+			string(avatar.StatusDeleting),
+			now,
+		).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO outbox_events")).
+		WithArgs(
+			"7e9b73db-f6d6-466d-aaee-34d4e9e76615",
+			"avatar.delete.v1",
+			"4a992fa3-df1a-4b5f-b764-546e99643eb0",
+			[]byte(`{"avatar_id":"4a992fa3-df1a-4b5f-b764-546e99643eb0"}`),
+			string(outbox.StatusPending),
+			0,
+			sql.NullString{},
+			now,
+			now,
+			sql.NullTime{},
+		).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	err := repo.SoftDeleteAvatarWithOutbox(context.Background(),
+		"4a992fa3-df1a-4b5f-b764-546e99643eb0",
+		"6f3f3c2d-df58-4e64-91ea-cdf90f4c9c1e",
+		now,
+		outbox.Event{
+			ID:        "7e9b73db-f6d6-466d-aaee-34d4e9e76615",
+			Topic:     "avatar.delete.v1",
+			Key:       "4a992fa3-df1a-4b5f-b764-546e99643eb0",
+			Payload:   []byte(`{"avatar_id":"4a992fa3-df1a-4b5f-b764-546e99643eb0"}`),
+			Status:    outbox.StatusPending,
+			CreatedAt: now,
+			UpdatedAt: now,
+		},
+	)
+	if err != nil {
+		t.Fatalf("SoftDeleteAvatarWithOutbox returned error: %v", err)
+	}
+
+	assertExpectations(t, mock)
+}
+
 // TestMarkOutboxPublishedUpdatesPendingEvent проверяет отметку успешной публикации
 func TestMarkOutboxPublishedUpdatesPendingEvent(t *testing.T) {
 	db, mock := newMockDB(t)

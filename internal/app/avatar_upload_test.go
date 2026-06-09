@@ -177,6 +177,8 @@ type fakeEventPublisher struct {
 	publishCalls  int
 	publishErr    error
 	topic         string
+	key           string
+	payload       []byte
 }
 
 // Publish запоминает fake-публикацию события
@@ -184,5 +186,7 @@ func (f *fakeEventPublisher) Publish(ctx context.Context, topic string, key stri
 	f.publishCalled = true
 	f.publishCalls++
 	f.topic = topic
+	f.key = key
+	f.payload = append([]byte(nil), payload...)
 	return f.publishErr
 }
