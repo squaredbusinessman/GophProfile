@@ -65,8 +65,8 @@ document.querySelector('#app').innerHTML = `
 
           <section class="tab-panel is-active" id="galleryPanel">
             <div class="toolbar">
-              <input class="input" id="galleryUserEmail" type="email" autocomplete="email"
-                placeholder="Email для галереи">
+              <input class="input" id="galleryUserID" type="text" autocomplete="off"
+                placeholder="User ID для галереи">
               <button class="button button--secondary" id="loadGalleryButton" type="button">Обновить</button>
             </div>
             <div class="avatar-list" id="avatarList">
@@ -93,7 +93,7 @@ const preview = document.querySelector('#preview');
 const previewImage = document.querySelector('#previewImage');
 const previewName = document.querySelector('#previewName');
 const previewMeta = document.querySelector('#previewMeta');
-const galleryUserEmail = document.querySelector('#galleryUserEmail');
+const galleryUserID = document.querySelector('#galleryUserID');
 const loadGalleryButton = document.querySelector('#loadGalleryButton');
 const avatarList = document.querySelector('#avatarList');
 const responseOutput = document.querySelector('#responseOutput');
@@ -181,9 +181,11 @@ uploadForm.addEventListener('submit', async (event) => {
     }
 
     showNotice('Аватарка отправлена на обработку', 'success');
-    galleryUserEmail.value = userEmail;
+    galleryUserID.value = data?.user_id || '';
     activateTab('gallery');
-    await loadGallery(userEmail);
+    if (data?.user_id) {
+      await loadGallery(data.user_id);
+    }
   } catch (error) {
     showNotice(`Ошибка сети: ${error.message}`, 'error');
   } finally {
@@ -192,16 +194,16 @@ uploadForm.addEventListener('submit', async (event) => {
 });
 
 loadGalleryButton.addEventListener('click', async () => {
-  const userEmail = normalizeEmail(galleryUserEmail.value);
-  const emailError = validateEmail(userEmail);
+  const userID = normalizeUserID(galleryUserID.value);
+  const userIDError = validateUserID(userID);
 
-  if (emailError) {
-    renderEmptyState(emailError);
+  if (userIDError) {
+    renderEmptyState(userIDError);
     return;
   }
 
-  galleryUserEmail.value = userEmail;
-  await loadGallery(userEmail);
+  galleryUserID.value = userID;
+  await loadGallery(userID);
 });
 
 async function checkHealth() {
@@ -215,12 +217,12 @@ async function checkHealth() {
   }
 }
 
-async function loadGallery(userEmail) {
+async function loadGallery(userID) {
   loadGalleryButton.disabled = true;
   renderEmptyState('Загрузка галереи');
 
   try {
-    const response = await fetch(`/api/v1/users/${encodeURIComponent(userEmail)}/avatars`);
+    const response = await fetch(`/api/v1/users/${encodeURIComponent(userID)}/avatars`);
     const data = await readResponse(response);
     renderApiResponse(response, data);
 
@@ -247,7 +249,8 @@ function renderGallery(avatars) {
 
   avatars.forEach((avatar) => {
     const id = avatar.id || avatar.avatar_id;
-    const userEmail = avatar.email || avatar.user_email || galleryUserEmail.value.trim();
+    const userID = avatar.user_id || galleryUserID.value.trim();
+    const ownerEmail = avatar.email || avatar.user_email || uploadUserEmail.value.trim();
     const imageUrl = avatar.url || `/api/v1/avatars/${encodeURIComponent(id)}?size=100x100`;
     const card = document.createElement('article');
     const image = document.createElement('img');
@@ -273,8 +276,8 @@ function renderGallery(avatars) {
     image.alt = `Аватарка ${id || ''}`;
     title.textContent = id || 'Без ID';
     meta.textContent = [
-      avatar.user_id ? `user_id: ${avatar.user_id}` : null,
-      userEmail ? `email: ${userEmail}` : null,
+      userID ? `user_id: ${userID}` : null,
+      ownerEmail ? `email: ${ownerEmail}` : null,
       avatar.status ? `status: ${avatar.status}` : null,
       avatar.processing_status ? `processing: ${avatar.processing_status}` : null
     ].filter(Boolean).join(', ');
@@ -291,8 +294,8 @@ function renderGallery(avatars) {
 
     deleteButton.type = 'button';
     deleteButton.textContent = 'Удалить';
-    deleteButton.disabled = !id || !userEmail;
-    deleteButton.addEventListener('click', () => deleteAvatar(id, userEmail));
+    deleteButton.disabled = !id || !ownerEmail;
+    deleteButton.addEventListener('click', () => deleteAvatar(id, ownerEmail));
 
     actions.append(metadataButton, openButton, deleteButton);
     content.append(title, meta, actions);
@@ -338,6 +341,22 @@ async function deleteAvatar(avatarId, userEmail) {
 
 function normalizeEmail(value) {
   return value.trim().toLowerCase();
+}
+
+function normalizeUserID(value) {
+  return value.trim();
+}
+
+function validateUserID(value) {
+  if (!value) {
+    return 'Укажите user_id пользователя';
+  }
+
+  if (!/^[0-9a-fA-F-]{36}$/.test(value)) {
+    return 'User ID должен быть UUID из ответа API';
+  }
+
+  return '';
 }
 
 function validateEmail(value) {

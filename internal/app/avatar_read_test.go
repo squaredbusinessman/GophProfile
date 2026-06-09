@@ -121,10 +121,52 @@ func TestGetLatestAvatarByUserIDUsesLatestActiveAvatar(t *testing.T) {
 	}
 }
 
+// TestGetAvatarMetadataMapsNotFound проверяет ошибку отсутствующей avatar
+func TestGetAvatarMetadataMapsNotFound(t *testing.T) {
+	service := NewAvatarReadService(&fakeAvatarReadRepository{
+		err: avatar.ErrNotFound,
+	}, &fakeAvatarObjectReader{})
+
+	_, err := service.GetAvatarMetadata(context.Background(), "missing")
+	if !errors.Is(err, ErrAvatarNotFound) {
+		t.Fatalf("error = %v, want ErrAvatarNotFound", err)
+	}
+}
+
+// TestListAvatarsByUserIDPassesPagination проверяет передачу pagination в repository
+func TestListAvatarsByUserIDPassesPagination(t *testing.T) {
+	repo := &fakeAvatarReadRepository{
+		items: []avatar.Avatar{
+			{
+				ID:                "avatar-1",
+				UserID:            "user-1",
+				MimeType:          "image/png",
+				Status:            avatar.StatusFailed,
+				OriginalObjectKey: "avatars/user-1/avatar-1/original",
+			},
+		},
+	}
+	service := NewAvatarReadService(repo, &fakeAvatarObjectReader{})
+
+	result, err := service.ListAvatarsByUserID(context.Background(), "user-1", 25, 5)
+	if err != nil {
+		t.Fatalf("ListAvatarsByUserID returned error: %v", err)
+	}
+	if repo.userID != "user-1" || repo.limit != 25 || repo.offset != 5 {
+		t.Fatalf("repo args = %q %d %d, want user-1 25 5", repo.userID, repo.limit, repo.offset)
+	}
+	if result.Limit != 25 || result.Offset != 5 || len(result.Items) != 1 {
+		t.Fatalf("result = %#v, want pagination and one item", result)
+	}
+}
+
 type fakeAvatarReadRepository struct {
-	item  avatar.Avatar
-	items []avatar.Avatar
-	err   error
+	item   avatar.Avatar
+	items  []avatar.Avatar
+	userID string
+	limit  int
+	offset int
+	err    error
 }
 
 // GetAvatar возвращает fake avatar по id
@@ -140,6 +182,9 @@ func (f *fakeAvatarReadRepository) GetAvatar(ctx context.Context, id string) (av
 
 // ListAvatarsByUser возвращает fake список avatar пользователя
 func (f *fakeAvatarReadRepository) ListAvatarsByUser(ctx context.Context, userID string, limit int, offset int) ([]avatar.Avatar, error) {
+	f.userID = userID
+	f.limit = limit
+	f.offset = offset
 	if f.err != nil {
 		return nil, f.err
 	}

@@ -213,22 +213,21 @@ GET /api/v1/avatars/{avatar_id}/metadata
 {
   "id": "uuid",
   "user_id": "uuid",
-  "email": "user@example.com",
   "file_name": "avatar.jpg",
   "mime_type": "image/jpeg",
-  "size": 1024000,
-  "dimensions": {
-    "width": 1920,
-    "height": 1080
-  },
+  "size_bytes": 1024000,
+  "width": 1920,
+  "height": 1080,
+  "status": "ready",
+  "url": "/api/v1/avatars/{avatar_id}",
   "thumbnails": [
     {
       "size": "100x100",
-      "url": "..."
+      "url": "/api/v1/avatars/{avatar_id}?size=100x100"
     },
     {
       "size": "300x300",
-      "url": "..."
+      "url": "/api/v1/avatars/{avatar_id}?size=300x300"
     }
   ],
   "created_at": "2024-01-01T00:00:00Z",
@@ -236,11 +235,49 @@ GET /api/v1/avatars/{avatar_id}/metadata
 }
 ```
 
+`thumbnails` содержит только уже созданные миниатюры. Для `processing` и
+`failed` ответ сохраняет актуальный `status`, но может вернуть пустой список
+миниатюр.
+
 ### Список аватарок пользователя
 
 ```http
-GET /api/v1/users/{user_email}/avatars
+GET /api/v1/users/{user_id}/avatars
 ```
+
+Query-параметры:
+
+```text
+limit: integer, default 50, max 100
+offset: integer, default 0
+```
+
+Ответ `200`:
+
+```json
+{
+  "items": [
+    {
+      "id": "uuid",
+      "user_id": "uuid",
+      "file_name": "avatar.jpg",
+      "mime_type": "image/jpeg",
+      "size_bytes": 1024000,
+      "width": 1920,
+      "height": 1080,
+      "status": "ready",
+      "url": "/api/v1/avatars/{avatar_id}",
+      "thumbnails": [],
+      "created_at": "2024-01-01T00:00:00Z",
+      "updated_at": "2024-01-01T00:00:00Z"
+    }
+  ],
+  "limit": 50,
+  "offset": 0
+}
+```
+
+Список фильтрует `deleted_at is null` и сортируется по `created_at desc`.
 
 ### Проверка работоспособности
 

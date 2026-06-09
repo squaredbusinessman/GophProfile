@@ -39,6 +39,16 @@ type AvatarReadResult struct {
 	Size        int64
 }
 
+type AvatarMetadataResult struct {
+	Avatar avatar.Avatar
+}
+
+type AvatarListResult struct {
+	Items  []avatar.Avatar
+	Limit  int
+	Offset int
+}
+
 // NewAvatarReadService создает service чтения avatar
 func NewAvatarReadService(avatars AvatarReadRepository, objects AvatarObjectReader) *AvatarReadService {
 	return &AvatarReadService{
@@ -71,6 +81,33 @@ func (s *AvatarReadService) GetLatestAvatarByUserID(ctx context.Context, userID 
 	}
 
 	return s.getAvatarObject(ctx, items[0], size, format)
+}
+
+// GetAvatarMetadata возвращает metadata активной avatar по id
+func (s *AvatarReadService) GetAvatarMetadata(ctx context.Context, avatarID string) (AvatarMetadataResult, error) {
+	item, err := s.avatars.GetAvatar(ctx, avatarID)
+	if err != nil {
+		if errors.Is(err, avatar.ErrNotFound) {
+			return AvatarMetadataResult{}, ErrAvatarNotFound
+		}
+		return AvatarMetadataResult{}, fmt.Errorf("get avatar metadata: %w", err)
+	}
+
+	return AvatarMetadataResult{Avatar: item}, nil
+}
+
+// ListAvatarsByUserID возвращает активные avatar пользователя
+func (s *AvatarReadService) ListAvatarsByUserID(ctx context.Context, userID string, limit int, offset int) (AvatarListResult, error) {
+	items, err := s.avatars.ListAvatarsByUser(ctx, userID, limit, offset)
+	if err != nil {
+		return AvatarListResult{}, fmt.Errorf("list avatars by user: %w", err)
+	}
+
+	return AvatarListResult{
+		Items:  items,
+		Limit:  limit,
+		Offset: offset,
+	}, nil
 }
 
 // getAvatarObject выбирает object key по size и возвращает stream из S3

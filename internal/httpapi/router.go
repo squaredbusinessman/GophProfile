@@ -18,6 +18,7 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/squaredbusinessman/GophProfile/internal/app"
+	"github.com/squaredbusinessman/GophProfile/internal/domain/avatar"
 )
 
 var requestCounter uint64
@@ -46,6 +47,8 @@ type AvatarUploader interface {
 type AvatarReader interface {
 	GetAvatarByID(ctx context.Context, avatarID string, size string, format string) (app.AvatarReadResult, error)
 	GetLatestAvatarByUserID(ctx context.Context, userID string, size string, format string) (app.AvatarReadResult, error)
+	GetAvatarMetadata(ctx context.Context, avatarID string) (app.AvatarMetadataResult, error)
+	ListAvatarsByUserID(ctx context.Context, userID string, limit int, offset int) (app.AvatarListResult, error)
 }
 
 // NewRouter создает HTTP router приложения
@@ -213,7 +216,20 @@ func (r *Router) handleAvatarByID(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	avatarID := strings.TrimPrefix(req.URL.Path, "/api/v1/avatars/")
+	avatarPath := strings.TrimPrefix(req.URL.Path, "/api/v1/avatars/")
+	if strings.HasSuffix(avatarPath, "/metadata") {
+		avatarID := strings.TrimSuffix(avatarPath, "/metadata")
+		if avatarID == "" || strings.Contains(avatarID, "/") {
+			writeJSON(w, http.StatusNotFound, map[string]string{
+				"error": "Avatar not found",
+			})
+			return
+		}
+		r.handleAvatarMetadata(w, req, avatarID)
+		return
+	}
+
+	avatarID := avatarPath
 	if avatarID == "" || strings.Contains(avatarID, "/") {
 		writeJSON(w, http.StatusNotFound, map[string]string{
 			"error": "Avatar not found",
@@ -233,6 +249,24 @@ func (r *Router) handleAvatarByID(w http.ResponseWriter, req *http.Request) {
 	writeAvatarBinary(w, result)
 }
 
+// handleAvatarMetadata возвращает JSON metadata avatar
+func (r *Router) handleAvatarMetadata(w http.ResponseWriter, req *http.Request, avatarID string) {
+	if r.avatarReader == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "avatar reader is not configured",
+		})
+		return
+	}
+
+	result, err := r.avatarReader.GetAvatarMetadata(req.Context(), avatarID)
+	if err != nil {
+		writeAvatarReadError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, avatarMetadataResponse(result.Avatar))
+}
+
 // handleUsers обрабатывает user-scoped API routes
 func (r *Router) handleUsers(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodGet {
@@ -244,6 +278,18 @@ func (r *Router) handleUsers(w http.ResponseWriter, req *http.Request) {
 	}
 
 	suffix := strings.TrimPrefix(req.URL.Path, "/api/v1/users/")
+	if strings.HasSuffix(suffix, "/avatars") {
+		userID := strings.TrimSuffix(suffix, "/avatars")
+		if userID == "" || strings.Contains(userID, "/") {
+			writeJSON(w, http.StatusNotFound, map[string]string{
+				"error": "Avatar not found",
+			})
+			return
+		}
+		r.handleUserAvatarList(w, req, userID)
+		return
+	}
+
 	userID, ok := strings.CutSuffix(suffix, "/avatar")
 	if !ok || userID == "" || strings.Contains(userID, "/") {
 		writeJSON(w, http.StatusNotFound, map[string]string{
@@ -264,6 +310,34 @@ func (r *Router) handleUsers(w http.ResponseWriter, req *http.Request) {
 	writeAvatarBinary(w, result)
 }
 
+// handleUserAvatarList возвращает список активных avatar пользователя
+func (r *Router) handleUserAvatarList(w http.ResponseWriter, req *http.Request, userID string) {
+	if r.avatarReader == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "avatar reader is not configured",
+		})
+		return
+	}
+
+	limit, offset := paginationParams(req)
+	result, err := r.avatarReader.ListAvatarsByUserID(req.Context(), userID, limit, offset)
+	if err != nil {
+		writeAvatarReadError(w, err)
+		return
+	}
+
+	items := make([]AvatarMetadataResponse, 0, len(result.Items))
+	for _, item := range result.Items {
+		items = append(items, avatarMetadataResponse(item))
+	}
+
+	writeJSON(w, http.StatusOK, AvatarListResponse{
+		Items:  items,
+		Limit:  limit,
+		Offset: offset,
+	})
+}
+
 type HealthResponse struct {
 	Status    string            `json:"status"`
 	Service   string            `json:"service"`
@@ -281,6 +355,63 @@ type AvatarUploadResponse struct {
 	Width     int       `json:"width,omitempty"`
 	Height    int       `json:"height,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
+}
+
+type AvatarMetadataResponse struct {
+	ID         string            `json:"id"`
+	UserID     string            `json:"user_id"`
+	FileName   string            `json:"file_name"`
+	MimeType   string            `json:"mime_type"`
+	SizeBytes  int64             `json:"size_bytes"`
+	Width      *int              `json:"width"`
+	Height     *int              `json:"height"`
+	Status     string            `json:"status"`
+	URL        string            `json:"url"`
+	Thumbnails []AvatarThumbnail `json:"thumbnails"`
+	CreatedAt  time.Time         `json:"created_at"`
+	UpdatedAt  time.Time         `json:"updated_at"`
+}
+
+type AvatarThumbnail struct {
+	Size string `json:"size"`
+	URL  string `json:"url"`
+}
+
+type AvatarListResponse struct {
+	Items  []AvatarMetadataResponse `json:"items"`
+	Limit  int                      `json:"limit"`
+	Offset int                      `json:"offset"`
+}
+
+// avatarMetadataResponse собирает JSON metadata avatar
+func avatarMetadataResponse(item avatar.Avatar) AvatarMetadataResponse {
+	response := AvatarMetadataResponse{
+		ID:         item.ID,
+		UserID:     item.UserID,
+		FileName:   item.FileName,
+		MimeType:   item.MimeType,
+		SizeBytes:  item.SizeBytes,
+		Width:      item.Width,
+		Height:     item.Height,
+		Status:     string(item.Status),
+		URL:        "/api/v1/avatars/" + item.ID,
+		Thumbnails: make([]AvatarThumbnail, 0, 2),
+		CreatedAt:  item.CreatedAt,
+		UpdatedAt:  item.UpdatedAt,
+	}
+	if item.Thumb100ObjectKey != nil && *item.Thumb100ObjectKey != "" {
+		response.Thumbnails = append(response.Thumbnails, AvatarThumbnail{
+			Size: "100x100",
+			URL:  "/api/v1/avatars/" + item.ID + "?size=100x100",
+		})
+	}
+	if item.Thumb300ObjectKey != nil && *item.Thumb300ObjectKey != "" {
+		response.Thumbnails = append(response.Thumbnails, AvatarThumbnail{
+			Size: "300x300",
+			URL:  "/api/v1/avatars/" + item.ID + "?size=300x300",
+		})
+	}
+	return response
 }
 
 // avatarReaderResult вызывает reader с query параметрами запроса
@@ -320,6 +451,28 @@ func writeAvatarBinary(w http.ResponseWriter, result app.AvatarReadResult) {
 	}
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.Copy(w, result.Body)
+}
+
+// paginationParams читает limit и offset с безопасными дефолтами
+func paginationParams(req *http.Request) (int, int) {
+	query := req.URL.Query()
+	limit := 50
+	offset := 0
+
+	if rawLimit := query.Get("limit"); rawLimit != "" {
+		parsed, err := strconv.Atoi(rawLimit)
+		if err == nil && parsed > 0 && parsed <= 100 {
+			limit = parsed
+		}
+	}
+	if rawOffset := query.Get("offset"); rawOffset != "" {
+		parsed, err := strconv.Atoi(rawOffset)
+		if err == nil && parsed >= 0 {
+			offset = parsed
+		}
+	}
+
+	return limit, offset
 }
 
 // writeValidationError записывает HTTP-ответ для ошибки валидации
