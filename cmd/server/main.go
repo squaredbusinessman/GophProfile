@@ -34,7 +34,9 @@ func main() {
 	if err != nil {
 		logger.Fatal().Err(err).Msg("open postgres connection pool")
 	}
-	defer db.Close()
+	defer func() {
+		_ = db.Close()
+	}()
 
 	s3Client, err := storages3.NewClient(cfg.S3)
 	if err != nil {

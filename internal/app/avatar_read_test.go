@@ -37,7 +37,9 @@ func TestGetAvatarByIDReturnsOriginal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetAvatarByID returned error: %v", err)
 	}
-	defer result.Body.Close()
+	defer func() {
+		_ = result.Body.Close()
+	}()
 
 	body, err := io.ReadAll(result.Body)
 	if err != nil {
@@ -116,7 +118,9 @@ func TestGetLatestAvatarByUserIDUsesLatestActiveAvatar(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetLatestAvatarByUserID returned error: %v", err)
 	}
-	defer result.Body.Close()
+	defer func() {
+		_ = result.Body.Close()
+	}()
 	if result.ContentType != "image/png" {
 		t.Fatalf("ContentType = %q, want image/png", result.ContentType)
 	}
@@ -150,7 +154,9 @@ func TestGetLatestAvatarByEmailResolvesUserID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetLatestAvatarByEmail returned error: %v", err)
 	}
-	defer result.Body.Close()
+	defer func() {
+		_ = result.Body.Close()
+	}()
 	if result.ContentType != "image/png" {
 		t.Fatalf("ContentType = %q, want image/png", result.ContentType)
 	}

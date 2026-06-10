@@ -145,7 +145,7 @@ func (c *Client) HealthCheck(ctx context.Context) error {
 
 // Close закрывает Kafka producer и дожидается отправки буфера
 func (c *Client) Close() {
-	c.consumer.Close()
+	_ = c.consumer.Close()
 	c.producer.Flush(int((5 * time.Second).Milliseconds()))
 	c.producer.Close()
 }

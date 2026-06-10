@@ -170,7 +170,9 @@ func (r *AvatarRepository) ListAvatarsByUser(ctx context.Context, userID string,
 	if err != nil {
 		return nil, fmt.Errorf("list avatars by user: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 
 	items := make([]avatar.Avatar, 0)
 	for rows.Next() {

@@ -85,7 +85,9 @@ func TestGetReturnsStreamAndMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get returned error: %v", err)
 	}
-	defer body.Close()
+	defer func() {
+		_ = body.Close()
+	}()
 
 	data, err := io.ReadAll(body)
 	if err != nil {

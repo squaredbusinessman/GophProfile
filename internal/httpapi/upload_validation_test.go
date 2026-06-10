@@ -18,7 +18,9 @@ func TestValidateAvatarUploadAcceptsJPEG(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ValidateAvatarUploadRequest returned error: %v", err)
 	}
-	defer upload.Close()
+	defer func() {
+		_ = upload.Close()
+	}()
 
 	if upload.UserID != testUserID {
 		t.Fatalf("UserID = %q, want normalized user id", upload.UserID)
@@ -43,7 +45,9 @@ func TestValidateAvatarUploadAcceptsPNG(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ValidateAvatarUploadRequest returned error: %v", err)
 	}
-	defer upload.Close()
+	defer func() {
+		_ = upload.Close()
+	}()
 
 	if upload.ContentType != "image/png" {
 		t.Fatalf("ContentType = %q, want image/png", upload.ContentType)
@@ -59,7 +63,9 @@ func TestValidateAvatarUploadAcceptsWebP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ValidateAvatarUploadRequest returned error: %v", err)
 	}
-	defer upload.Close()
+	defer func() {
+		_ = upload.Close()
+	}()
 
 	if upload.ContentType != "image/webp" {
 		t.Fatalf("ContentType = %q, want image/webp", upload.ContentType)

@@ -26,7 +26,9 @@ func (r *OutboxRepository) CreateAvatarWithOutbox(ctx context.Context, item avat
 	if err != nil {
 		return fmt.Errorf("begin avatar outbox transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() {
+		_ = tx.Rollback()
+	}()
 
 	if err := insertAvatar(ctx, tx, item); err != nil {
 		return err
@@ -47,7 +49,9 @@ func (r *OutboxRepository) SoftDeleteAvatarWithOutbox(ctx context.Context, id st
 	if err != nil {
 		return fmt.Errorf("begin avatar delete outbox transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() {
+		_ = tx.Rollback()
+	}()
 
 	result, err := tx.ExecContext(ctx, `
 		UPDATE avatars
@@ -134,7 +138,9 @@ func (r *OutboxRepository) ListPendingOutboxEvents(ctx context.Context, limit in
 	if err != nil {
 		return nil, fmt.Errorf("list pending outbox events: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 
 	events := make([]outbox.Event, 0)
 	for rows.Next() {

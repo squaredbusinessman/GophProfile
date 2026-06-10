@@ -116,7 +116,9 @@ func (s *AvatarProcessService) processAvatar(ctx context.Context, message Avatar
 	if err != nil {
 		return retryableProcessError{err: err}
 	}
-	defer body.Close()
+	defer func() {
+		_ = body.Close()
+	}()
 
 	decoded, err := imageproc.Decode(body)
 	if err != nil {

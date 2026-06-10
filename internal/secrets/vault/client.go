@@ -50,7 +50,9 @@ func (c *Client) ReadKV2(ctx context.Context, path string) (map[string]string, e
 	if err != nil {
 		return nil, fmt.Errorf("read vault secret: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode == http.StatusNotFound {
 		return nil, ErrSecretNotFound
@@ -79,7 +81,9 @@ func (c *Client) HealthCheck(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("check vault health: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode == http.StatusOK || resp.StatusCode == httpStatusStandby {
 		return nil

@@ -202,7 +202,9 @@ func (r *Router) handlePublicAvatarByEmail(w http.ResponseWriter, req *http.Requ
 		writeAvatarReadError(w, err)
 		return
 	}
-	defer result.Body.Close()
+	defer func() {
+		_ = result.Body.Close()
+	}()
 
 	writeAvatarBinary(w, result)
 }
@@ -221,7 +223,9 @@ func (r *Router) handleAvatarUpload(w http.ResponseWriter, req *http.Request) {
 		writeValidationError(w, err)
 		return
 	}
-	defer upload.Close()
+	defer func() {
+		_ = upload.Close()
+	}()
 
 	file, err := upload.Open()
 	if err != nil {
@@ -231,7 +235,9 @@ func (r *Router) handleAvatarUpload(w http.ResponseWriter, req *http.Request) {
 		})
 		return
 	}
-	defer file.Close()
+	defer func() {
+		_ = file.Close()
+	}()
 
 	body, err := io.ReadAll(file)
 	if err != nil {
@@ -327,7 +333,9 @@ func (r *Router) handleAvatarByID(w http.ResponseWriter, req *http.Request) {
 		writeAvatarReadError(w, err)
 		return
 	}
-	defer result.Body.Close()
+	defer func() {
+		_ = result.Body.Close()
+	}()
 
 	writeAvatarBinary(w, result)
 }
@@ -423,7 +431,9 @@ func (r *Router) handleUsers(w http.ResponseWriter, req *http.Request) {
 		writeAvatarReadError(w, err)
 		return
 	}
-	defer result.Body.Close()
+	defer func() {
+		_ = result.Body.Close()
+	}()
 
 	writeAvatarBinary(w, result)
 }
