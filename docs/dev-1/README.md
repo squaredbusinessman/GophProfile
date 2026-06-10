@@ -559,8 +559,40 @@ Dockerfile должен использовать multi-stage build.
 
 Docker Compose для разработки должен запускать:
 
-- Приложение `server`
-- Приложение `worker`
-- PostgreSQL
-- RabbitMQ или Kafka
-- MinIO
+- `server`
+- `worker`
+- `postgres`
+- `kafka`
+- `minio`
+- `frontend-build`
+
+Служебный сервис `migrate` применяет SQL-миграции до старта `server` и
+`worker`.
+
+Compose env:
+
+```text
+DATABASE_URL
+S3_ENDPOINT
+S3_BUCKET
+S3_ACCESS_KEY
+S3_SECRET_KEY
+S3_USE_PATH_STYLE
+KAFKA_BROKERS
+KAFKA_CLIENT_ID
+KAFKA_CONSUMER_GROUP
+HTTP_ADDR
+CORS_ALLOWED_ORIGINS
+```
+
+При `APP_ENV=local` `server` и `worker` создают MinIO bucket из `S3_BUCKET`,
+если он еще отсутствует.
+
+Полный локальный запуск выполняется одной командой:
+
+```bash
+./scripts/local-up.sh
+```
+
+Скрипт запускает Docker Compose, дожидается readiness ключевых сервисов и
+проверяет `server /health`, frontend `/web/` и MinIO bucket.

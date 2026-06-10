@@ -45,6 +45,9 @@ func main() {
 	if err != nil {
 		logger.Fatal().Err(err).Msg("create s3 client")
 	}
+	if err := app.EnsureLocalS3Bucket(ctx, cfg, s3Client); err != nil {
+		logger.Fatal().Err(err).Msg("ensure local s3 bucket")
+	}
 
 	avatarRepo := postgres.NewAvatarRepository(db)
 	outboxRepo := postgres.NewOutboxRepository(db)

@@ -93,14 +93,23 @@ docker compose -f deploy/vault/docker-compose.yml up -d
 Локальный запуск основного окружения:
 
 ```bash
-docker compose -f deploy/docker-compose.yml up --build
+./scripts/local-up.sh
 ```
 
 Сервисы:
 
-- backend API: `http://localhost:8080`
-- frontend: `http://localhost:3000/web/`
+- server API: `http://localhost:8080`
+- frontend-build: `http://localhost:3000/web/`
 - PostgreSQL: `localhost:5432`
 - Kafka: `kafka:9092` внутри compose-сети
 - MinIO API: `http://localhost:9000`
 - MinIO Console: `http://localhost:9001`
+
+В локальном compose `server` и `worker` автоматически создают MinIO bucket из
+`S3_BUCKET`, если он еще отсутствует.
+
+Для повторного запуска без пересборки образов:
+
+```bash
+./scripts/local-up.sh --no-build
+```

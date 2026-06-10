@@ -128,6 +128,37 @@ func TestExistsReturnsFalseForNotFound(t *testing.T) {
 	}
 }
 
+// TestEnsureBucketSkipsExistingBucket проверяет отсутствие создания существующего bucket
+func TestEnsureBucketSkipsExistingBucket(t *testing.T) {
+	api := &fakeObjectStorageAPI{
+		bucketExists: true,
+	}
+	client := newClientWithRegion("avatars", "us-east-1", api)
+
+	if err := client.EnsureBucket(context.Background()); err != nil {
+		t.Fatalf("EnsureBucket returned error: %v", err)
+	}
+	if api.makeBucket != "" {
+		t.Fatalf("makeBucket = %q, want empty", api.makeBucket)
+	}
+}
+
+// TestEnsureBucketCreatesMissingBucket проверяет создание отсутствующего bucket
+func TestEnsureBucketCreatesMissingBucket(t *testing.T) {
+	api := &fakeObjectStorageAPI{}
+	client := newClientWithRegion("avatars", "us-east-1", api)
+
+	if err := client.EnsureBucket(context.Background()); err != nil {
+		t.Fatalf("EnsureBucket returned error: %v", err)
+	}
+	if api.makeBucket != "avatars" {
+		t.Fatalf("makeBucket = %q, want avatars", api.makeBucket)
+	}
+	if api.makeRegion != "us-east-1" {
+		t.Fatalf("makeRegion = %q, want us-east-1", api.makeRegion)
+	}
+}
+
 // TestGetMapsNotFoundToDomainError проверяет маппинг S3 not found в доменную ошибку
 func TestGetMapsNotFoundToDomainError(t *testing.T) {
 	api := &fakeObjectStorageAPI{
@@ -187,6 +218,9 @@ type fakeObjectStorageAPI struct {
 	removeErr      error
 	bucketExists   bool
 	bucketErr      error
+	makeBucket     string
+	makeRegion     string
+	makeErr        error
 }
 
 // PutObject записывает параметры сохранения в fake API
@@ -222,4 +256,11 @@ func (f *fakeObjectStorageAPI) RemoveObject(ctx context.Context, bucket string, 
 // BucketExists возвращает fake-результат проверки bucket
 func (f *fakeObjectStorageAPI) BucketExists(ctx context.Context, bucket string) (bool, error) {
 	return f.bucketExists, f.bucketErr
+}
+
+// MakeBucket записывает параметры создания bucket в fake API
+func (f *fakeObjectStorageAPI) MakeBucket(ctx context.Context, bucket string, region string) error {
+	f.makeBucket = bucket
+	f.makeRegion = region
+	return f.makeErr
 }

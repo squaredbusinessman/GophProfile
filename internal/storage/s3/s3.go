@@ -30,6 +30,7 @@ type Store interface {
 
 type Client struct {
 	bucket string
+	region string
 	api    objectStorageAPI
 }
 
@@ -48,6 +49,7 @@ type objectStorageAPI interface {
 	StatObject(ctx context.Context, bucket string, key string) (ObjectMetadata, error)
 	RemoveObject(ctx context.Context, bucket string, key string) error
 	BucketExists(ctx context.Context, bucket string) (bool, error)
+	MakeBucket(ctx context.Context, bucket string, region string) error
 }
 
 type minioAdapter struct {
@@ -78,13 +80,19 @@ func NewClient(cfg config.S3Config) (*Client, error) {
 		return nil, fmt.Errorf("create s3 client: %w", err)
 	}
 
-	return newClientWithAPI(cfg.Bucket, &minioAdapter{sdk: sdk}), nil
+	return newClientWithRegion(cfg.Bucket, cfg.Region, &minioAdapter{sdk: sdk}), nil
 }
 
 // newClientWithAPI создает S3 client поверх готового SDK-совместимого API
 func newClientWithAPI(bucket string, api objectStorageAPI) *Client {
+	return newClientWithRegion(bucket, "", api)
+}
+
+// newClientWithRegion создает S3 client с явно заданным region
+func newClientWithRegion(bucket string, region string, api objectStorageAPI) *Client {
 	return &Client{
 		bucket: bucket,
+		region: region,
 		api:    api,
 	}
 }
@@ -168,6 +176,26 @@ func (c *Client) HealthCheck(ctx context.Context) error {
 	return nil
 }
 
+// EnsureBucket создает bucket если он отсутствует
+func (c *Client) EnsureBucket(ctx context.Context) error {
+	exists, err := c.api.BucketExists(ctx, c.bucket)
+	if err != nil {
+		return wrapError("check bucket", "", err)
+	}
+	if exists {
+		return nil
+	}
+
+	if err := c.api.MakeBucket(ctx, c.bucket, c.region); err != nil {
+		exists, checkErr := c.api.BucketExists(ctx, c.bucket)
+		if checkErr == nil && exists {
+			return nil
+		}
+		return wrapError("create bucket", "", err)
+	}
+	return nil
+}
+
 // Bucket возвращает имя bucket хранилища
 func (c *Client) Bucket() string {
 	return c.bucket
@@ -203,6 +231,13 @@ func (a *minioAdapter) RemoveObject(ctx context.Context, bucket string, key stri
 // BucketExists проверяет наличие bucket через MinIO SDK
 func (a *minioAdapter) BucketExists(ctx context.Context, bucket string) (bool, error) {
 	return a.sdk.BucketExists(ctx, bucket)
+}
+
+// MakeBucket создает bucket через MinIO SDK
+func (a *minioAdapter) MakeBucket(ctx context.Context, bucket string, region string) error {
+	return a.sdk.MakeBucket(ctx, bucket, minio.MakeBucketOptions{
+		Region: region,
+	})
 }
 
 // OriginalObjectKey возвращает object key оригинального изображения по UUID пользователя
