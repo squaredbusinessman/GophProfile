@@ -8,10 +8,13 @@ import (
 )
 
 const (
-	defaultServiceName = "gophprofile"
-	defaultVersion     = "dev"
-	defaultEnv         = "local"
-	defaultHTTPAddr    = ":8080"
+	defaultServiceName        = "gophprofile"
+	defaultVersion            = "dev"
+	defaultEnv                = "local"
+	defaultHTTPAddr           = ":8080"
+	defaultRateLimitRPS       = 20
+	defaultRateLimitBurst     = 40
+	defaultCORSAllowedOrigins = "http://localhost:3000,http://localhost:5173"
 )
 
 type Config struct {
@@ -28,11 +31,14 @@ type Config struct {
 }
 
 type HTTPConfig struct {
-	Addr            string
-	ReadTimeout     time.Duration
-	WriteTimeout    time.Duration
-	IdleTimeout     time.Duration
-	ShutdownTimeout time.Duration
+	Addr               string
+	ReadTimeout        time.Duration
+	WriteTimeout       time.Duration
+	IdleTimeout        time.Duration
+	ShutdownTimeout    time.Duration
+	CORSAllowedOrigins []string
+	RateLimitRPS       int
+	RateLimitBurst     int
 }
 
 type PostgresConfig struct {
@@ -108,11 +114,14 @@ func Load() Config {
 		Env:         envString("APP_ENV", defaultEnv),
 		LogLevel:    envString("LOG_LEVEL", "debug"),
 		HTTP: HTTPConfig{
-			Addr:            envString("HTTP_ADDR", defaultHTTPAddr),
-			ReadTimeout:     envDuration("HTTP_READ_TIMEOUT", 10*time.Second),
-			WriteTimeout:    envDuration("HTTP_WRITE_TIMEOUT", 10*time.Second),
-			IdleTimeout:     envDuration("HTTP_IDLE_TIMEOUT", 60*time.Second),
-			ShutdownTimeout: envDuration("HTTP_SHUTDOWN_TIMEOUT", 10*time.Second),
+			Addr:               envString("HTTP_ADDR", defaultHTTPAddr),
+			ReadTimeout:        envDuration("HTTP_READ_TIMEOUT", 10*time.Second),
+			WriteTimeout:       envDuration("HTTP_WRITE_TIMEOUT", 10*time.Second),
+			IdleTimeout:        envDuration("HTTP_IDLE_TIMEOUT", 60*time.Second),
+			ShutdownTimeout:    envDuration("HTTP_SHUTDOWN_TIMEOUT", 10*time.Second),
+			CORSAllowedOrigins: envCSV("CORS_ALLOWED_ORIGINS", splitCSV(defaultCORSAllowedOrigins)),
+			RateLimitRPS:       envInt("API_RATE_LIMIT_RPS", defaultRateLimitRPS),
+			RateLimitBurst:     envInt("API_RATE_LIMIT_BURST", defaultRateLimitBurst),
 		},
 		Postgres: PostgresConfig{
 			DSN: envString("DATABASE_URL", "postgres://gophprofile:gophprofile@localhost:5432/gophprofile?sslmode=disable"),

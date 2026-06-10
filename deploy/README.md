@@ -25,6 +25,18 @@ docker compose -f deploy/docker-compose.yml up --build
 - MinIO API: `http://localhost:9000`
 - MinIO Console: `http://localhost:9001`
 
+## Security env
+
+Backend в compose получает локальные security-настройки:
+
+```text
+CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:5173
+API_RATE_LIMIT_RPS=20
+API_RATE_LIMIT_BURST=40
+```
+
+`CORS_ALLOWED_ORIGINS` должен оставаться явным списком origins без wildcard.
+
 ## Миграции
 
 Сервис `migrate` применяет SQL-файлы из `migrations`.

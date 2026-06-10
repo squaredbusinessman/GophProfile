@@ -29,6 +29,9 @@ type RouterConfig struct {
 	ServiceName    string
 	Version        string
 	Logger         zerolog.Logger
+	AllowedOrigins []string
+	RateLimitRPS   int
+	RateLimitBurst int
 	AvatarUploader AvatarUploader
 	AvatarReader   AvatarReader
 	AvatarDeleter  AvatarDeleter
@@ -38,6 +41,8 @@ type Router struct {
 	serviceName    string
 	version        string
 	logger         zerolog.Logger
+	cors           corsPolicy
+	rateLimiter    *clientRateLimiter
 	avatarUploader AvatarUploader
 	avatarReader   AvatarReader
 	avatarDeleter  AvatarDeleter
@@ -67,6 +72,8 @@ func NewRouter(cfg RouterConfig) http.Handler {
 		serviceName:    cfg.ServiceName,
 		version:        cfg.Version,
 		logger:         cfg.Logger,
+		cors:           newCORSPolicy(cfg.AllowedOrigins),
+		rateLimiter:    newClientRateLimiter(cfg.RateLimitRPS, cfg.RateLimitBurst),
 		avatarUploader: cfg.AvatarUploader,
 		avatarReader:   cfg.AvatarReader,
 		avatarDeleter:  cfg.AvatarDeleter,
@@ -93,7 +100,16 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		statusCode:     http.StatusOK,
 	}
 
-	r.mux.ServeHTTP(rec, req)
+	if !r.handleCORS(rec, req) {
+		if r.shouldLimit(req) && !r.allowRequest(req) {
+			rec.Header().Set("Retry-After", "1")
+			writeJSON(rec, http.StatusTooManyRequests, map[string]string{
+				"error": "Too many requests",
+			})
+		} else {
+			r.mux.ServeHTTP(rec, req)
+		}
+	}
 
 	event := r.logger.Info()
 	if rec.statusCode >= http.StatusInternalServerError {

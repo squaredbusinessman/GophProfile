@@ -12,6 +12,9 @@ func TestLoadUsesLocalDefaults(t *testing.T) {
 	t.Setenv("APP_VERSION", "")
 	t.Setenv("APP_ENV", "")
 	t.Setenv("HTTP_ADDR", "")
+	t.Setenv("CORS_ALLOWED_ORIGINS", "")
+	t.Setenv("API_RATE_LIMIT_RPS", "")
+	t.Setenv("API_RATE_LIMIT_BURST", "")
 	t.Setenv("DATABASE_URL", "")
 	t.Setenv("KAFKA_BROKERS", "")
 
@@ -22,6 +25,15 @@ func TestLoadUsesLocalDefaults(t *testing.T) {
 	}
 	if cfg.HTTP.Addr != ":8080" {
 		t.Fatalf("HTTP.Addr = %q, want %q", cfg.HTTP.Addr, ":8080")
+	}
+	if !reflect.DeepEqual(cfg.HTTP.CORSAllowedOrigins, []string{"http://localhost:3000", "http://localhost:5173"}) {
+		t.Fatalf("HTTP.CORSAllowedOrigins = %#v, want local frontend origins", cfg.HTTP.CORSAllowedOrigins)
+	}
+	if cfg.HTTP.RateLimitRPS != 20 {
+		t.Fatalf("HTTP.RateLimitRPS = %d, want 20", cfg.HTTP.RateLimitRPS)
+	}
+	if cfg.HTTP.RateLimitBurst != 40 {
+		t.Fatalf("HTTP.RateLimitBurst = %d, want 40", cfg.HTTP.RateLimitBurst)
 	}
 	if cfg.Postgres.DSN == "" {
 		t.Fatal("Postgres.DSN should have a local default")
@@ -43,6 +55,9 @@ func TestLoadReadsEnvironment(t *testing.T) {
 	t.Setenv("APP_VERSION", "test-version")
 	t.Setenv("HTTP_ADDR", "127.0.0.1:9090")
 	t.Setenv("HTTP_READ_TIMEOUT", "3s")
+	t.Setenv("CORS_ALLOWED_ORIGINS", "https://app.example.com, https://admin.example.com")
+	t.Setenv("API_RATE_LIMIT_RPS", "7")
+	t.Setenv("API_RATE_LIMIT_BURST", "9")
 	t.Setenv("S3_USE_PATH_STYLE", "false")
 	t.Setenv("KAFKA_BROKERS", "localhost:19092, localhost:29092")
 	t.Setenv("OUTBOX_POLL_INTERVAL", "2s")
@@ -61,6 +76,15 @@ func TestLoadReadsEnvironment(t *testing.T) {
 	}
 	if cfg.HTTP.ReadTimeout != 3*time.Second {
 		t.Fatalf("HTTP.ReadTimeout = %s, want 3s", cfg.HTTP.ReadTimeout)
+	}
+	if !reflect.DeepEqual(cfg.HTTP.CORSAllowedOrigins, []string{"https://app.example.com", "https://admin.example.com"}) {
+		t.Fatalf("HTTP.CORSAllowedOrigins = %#v, want configured origins", cfg.HTTP.CORSAllowedOrigins)
+	}
+	if cfg.HTTP.RateLimitRPS != 7 {
+		t.Fatalf("HTTP.RateLimitRPS = %d, want 7", cfg.HTTP.RateLimitRPS)
+	}
+	if cfg.HTTP.RateLimitBurst != 9 {
+		t.Fatalf("HTTP.RateLimitBurst = %d, want 9", cfg.HTTP.RateLimitBurst)
 	}
 	if cfg.S3.UsePathStyle {
 		t.Fatal("S3.UsePathStyle = true, want false")

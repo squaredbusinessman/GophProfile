@@ -53,10 +53,35 @@ Object storage изолируется через [S3-слой](s3-storage.md).
 ### 4. Бонусная задача: обеспечить безопасность
 
 - Валидировать MIME-типы и magic bytes
-- Ограничить размер файлов
+- Ограничить размер файлов через `10MB` file limit и multipart body overhead
 - Добавить rate limiting для API
-- Настроить CORS
+- Настроить CORS через явный allowlist origins из env
 - Валидировать внутренний UUID пользователя из `X-User-ID`
+- Не отдавать клиенту внутренние object keys, DSN и stack traces
+
+## Безопасность API
+
+Минимальный security-контракт спринта:
+
+- Upload ограничивает multipart body через `http.MaxBytesReader`
+- Максимальный размер файла остается `10MB`
+- MIME из multipart header должен совпадать с magic bytes `JPEG`, `PNG` или `WebP`
+- `X-User-ID` обязателен для защищенных операций и должен быть внутренним UUID
+- Public lookup по email доступен только через `GET /api/v1/avatar?email=...`
+- API rate limiting применяется ко всем routes с префиксом `/api/`
+- Rate limiting использует `RemoteAddr`; proxy headers в MVP не считаются доверенными
+- `/health` не зависит от API limiter
+- CORS разрешает только origins из `CORS_ALLOWED_ORIGINS`
+- Wildcard `*` не используется как допустимый CORS origin
+- Внешние JSON-ошибки остаются обобщенными и не раскрывают S3 keys, DSN и stack traces
+
+Переменные окружения:
+
+```text
+CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:5173
+API_RATE_LIMIT_RPS=20
+API_RATE_LIMIT_BURST=40
+```
 
 ## API
 
