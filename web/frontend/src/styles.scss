@@ -177,6 +177,10 @@ button:disabled {
     box-shadow: 0 0 0 3px rgba(104, 151, 187, 0.24);
   }
 
+  &[readonly] {
+    color: $muted;
+  }
+
   &--file {
     padding: 8px;
 

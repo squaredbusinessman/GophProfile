@@ -116,6 +116,10 @@ frontend_ok() {
 	compose exec -T frontend-build wget -qO- http://127.0.0.1/web/ >/dev/null 2>&1
 }
 
+frontend_proxy_health_ok() {
+	compose exec -T frontend-build wget -qO- http://127.0.0.1/health >/dev/null 2>&1
+}
+
 bucket_exists() {
 	compose exec -T minio sh -c "test -d /data/$S3_BUCKET" >/dev/null 2>&1
 }
@@ -170,6 +174,7 @@ wait_for "worker running" is_running worker || fail_wait
 wait_for "frontend running" is_running frontend-build || fail_wait
 wait_for "server healthcheck" server_health_ok || fail_wait
 wait_for "frontend /web/" frontend_ok || fail_wait
+wait_for "frontend proxy /health" frontend_proxy_health_ok || fail_wait
 wait_for "minio bucket $S3_BUCKET" bucket_exists || fail_wait
 
 log ""

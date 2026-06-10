@@ -183,6 +183,33 @@ GET /api/v1/avatars/{avatar_id}?size=300x300&format=png
 GET /api/v1/avatar?email=user@example.com&size=100x100
 ```
 
+Для локального MVP связка `email -> users.id` создается idempotent endpoint:
+
+```http
+POST /api/v1/users/resolve
+Content-Type: application/json
+
+{
+  "email": "user@example.com"
+}
+```
+
+Ответ:
+
+```json
+{
+  "id": "uuid",
+  "user_id": "uuid",
+  "email": "user@example.com",
+  "created_at": "2026-06-10T00:00:00Z",
+  "updated_at": "2026-06-10T00:00:00Z"
+}
+```
+
+В production эту связку должен создавать внешний user/profile service или auth
+контур. GophProfile хранит `email` как атрибут пользователя, но все защищенные
+операции upload/delete/list продолжают работать через внутренний `user_id`.
+
 Ответ `200`:
 
 ```text

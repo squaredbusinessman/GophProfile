@@ -32,6 +32,7 @@ type RouterConfig struct {
 	AllowedOrigins []string
 	RateLimitRPS   int
 	RateLimitBurst int
+	UserResolver   UserResolver
 	AvatarUploader AvatarUploader
 	AvatarReader   AvatarReader
 	AvatarDeleter  AvatarDeleter
@@ -43,10 +44,15 @@ type Router struct {
 	logger         zerolog.Logger
 	cors           corsPolicy
 	rateLimiter    *clientRateLimiter
+	userResolver   UserResolver
 	avatarUploader AvatarUploader
 	avatarReader   AvatarReader
 	avatarDeleter  AvatarDeleter
 	mux            *http.ServeMux
+}
+
+type UserResolver interface {
+	ResolveUserByEmail(ctx context.Context, email string) (app.UserResolveResult, error)
 }
 
 type AvatarUploader interface {
@@ -74,6 +80,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 		logger:         cfg.Logger,
 		cors:           newCORSPolicy(cfg.AllowedOrigins),
 		rateLimiter:    newClientRateLimiter(cfg.RateLimitRPS, cfg.RateLimitBurst),
+		userResolver:   cfg.UserResolver,
 		avatarUploader: cfg.AvatarUploader,
 		avatarReader:   cfg.AvatarReader,
 		avatarDeleter:  cfg.AvatarDeleter,
@@ -84,6 +91,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	router.mux.HandleFunc("/api/v1/avatar", router.handlePublicAvatarByEmail)
 	router.mux.HandleFunc("/api/v1/avatars", router.handleAvatars)
 	router.mux.HandleFunc("/api/v1/avatars/", router.handleAvatarByID)
+	router.mux.HandleFunc("/api/v1/users/resolve", router.handleUserResolve)
 	router.mux.HandleFunc("/api/v1/users/", router.handleUsers)
 
 	return router
@@ -471,6 +479,59 @@ func (r *Router) handleUserAvatarList(w http.ResponseWriter, req *http.Request, 
 	})
 }
 
+const maxUserResolveBodyBytes int64 = 4 * 1024
+
+// handleUserResolve сопоставляет email с внутренним user_id
+func (r *Router) handleUserResolve(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{
+			"error": "method not allowed",
+		})
+		return
+	}
+	if r.userResolver == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "user resolver is not configured",
+		})
+		return
+	}
+
+	var payload UserResolveRequest
+	req.Body = http.MaxBytesReader(w, req.Body, maxUserResolveBodyBytes)
+	decoder := json.NewDecoder(req.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&payload); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error":   "Invalid request",
+			"details": "Request body must contain email",
+		})
+		return
+	}
+
+	email, err := validateLookupEmail(payload.Email)
+	if err != nil {
+		writeValidationError(w, err)
+		return
+	}
+
+	result, err := r.userResolver.ResolveUserByEmail(req.Context(), email)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "User resolve failed",
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, UserResolveResponse{
+		ID:        result.ID,
+		UserID:    result.ID,
+		Email:     result.Email,
+		CreatedAt: result.CreatedAt,
+		UpdatedAt: result.UpdatedAt,
+	})
+}
+
 type HealthResponse struct {
 	Status    string            `json:"status"`
 	Service   string            `json:"service"`
@@ -487,6 +548,18 @@ type AvatarUploadResponse struct {
 	Width     int       `json:"width,omitempty"`
 	Height    int       `json:"height,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
+}
+
+type UserResolveRequest struct {
+	Email string `json:"email"`
+}
+
+type UserResolveResponse struct {
+	ID        string    `json:"id"`
+	UserID    string    `json:"user_id"`
+	Email     string    `json:"email"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type AvatarMetadataResponse struct {

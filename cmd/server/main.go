@@ -53,6 +53,7 @@ func main() {
 	userRepo := postgres.NewUserRepository(db)
 	outboxRepo := postgres.NewOutboxRepository(db)
 	avatarRepo := postgres.NewAvatarRepository(db)
+	userResolveService := app.NewUserResolveService(userRepo)
 	avatarUploadService := app.NewAvatarUploadService(userRepo, outboxRepo, s3Client, kafkaClient)
 	avatarReadService := app.NewAvatarReadServiceWithUsers(userRepo, avatarRepo, s3Client)
 	avatarDeleteService := app.NewAvatarDeleteService(avatarRepo, outboxRepo, kafkaClient)
@@ -64,6 +65,7 @@ func main() {
 		AllowedOrigins: cfg.HTTP.CORSAllowedOrigins,
 		RateLimitRPS:   cfg.HTTP.RateLimitRPS,
 		RateLimitBurst: cfg.HTTP.RateLimitBurst,
+		UserResolver:   userResolveService,
 		AvatarUploader: avatarUploadService,
 		AvatarReader:   avatarReadService,
 		AvatarDeleter:  avatarDeleteService,

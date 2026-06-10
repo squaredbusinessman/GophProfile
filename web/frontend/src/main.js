@@ -22,11 +22,22 @@ document.querySelector('#app').innerHTML = `
 
         <form class="panel__body form" id="uploadForm">
           <label class="field">
-            <span class="field__label">User ID</span>
-            <input class="input" id="uploadUserID" name="user_id" type="text" autocomplete="off" required
-              placeholder="6f3f3c2d-df58-4e64-91ea-cdf90f4c9c1e">
-            <span class="field__hint">Внутренний UUID пользователя для header X-User-ID</span>
+            <span class="field__label">Email</span>
+            <input class="input" id="userEmail" name="email" type="email" autocomplete="email" required
+              placeholder="user@example.com">
+            <span class="field__hint">Email будет связан с внутренним UUID пользователя</span>
           </label>
+
+          <label class="field">
+            <span class="field__label">User ID</span>
+            <input class="input" id="uploadUserID" name="user_id" type="text" autocomplete="off" readonly
+              placeholder="6f3f3c2d-df58-4e64-91ea-cdf90f4c9c1e">
+            <span class="field__hint">Внутренний UUID для header X-User-ID создается или находится по email</span>
+          </label>
+
+          <div class="actions">
+            <button class="button button--secondary" id="resolveUserButton" type="button">Получить UUID</button>
+          </div>
 
           <label class="field">
             <span class="field__label">Файл</span>
@@ -65,6 +76,11 @@ document.querySelector('#app').innerHTML = `
 
           <section class="tab-panel is-active" id="galleryPanel">
             <div class="toolbar">
+              <input class="input" id="galleryEmail" type="email" autocomplete="email"
+                placeholder="Email для публичного поиска">
+              <button class="button button--secondary" id="resolveGalleryButton" type="button">Найти</button>
+            </div>
+            <div class="toolbar">
               <input class="input" id="galleryUserID" type="text" autocomplete="off"
                 placeholder="User ID для галереи">
               <button class="button button--secondary" id="loadGalleryButton" type="button">Обновить</button>
@@ -84,17 +100,21 @@ document.querySelector('#app').innerHTML = `
 `;
 
 const uploadForm = document.querySelector('#uploadForm');
+const userEmail = document.querySelector('#userEmail');
 const uploadUserID = document.querySelector('#uploadUserID');
 const avatarFile = document.querySelector('#avatarFile');
 const uploadButton = document.querySelector('#uploadButton');
+const resolveUserButton = document.querySelector('#resolveUserButton');
 const resetButton = document.querySelector('#resetButton');
 const uploadNotice = document.querySelector('#uploadNotice');
 const preview = document.querySelector('#preview');
 const previewImage = document.querySelector('#previewImage');
 const previewName = document.querySelector('#previewName');
 const previewMeta = document.querySelector('#previewMeta');
+const galleryEmail = document.querySelector('#galleryEmail');
 const galleryUserID = document.querySelector('#galleryUserID');
 const loadGalleryButton = document.querySelector('#loadGalleryButton');
+const resolveGalleryButton = document.querySelector('#resolveGalleryButton');
 const avatarList = document.querySelector('#avatarList');
 const responseOutput = document.querySelector('#responseOutput');
 const apiStatus = document.querySelector('#apiStatus');
@@ -134,12 +154,30 @@ resetButton.addEventListener('click', () => {
   hideNotice();
 });
 
+resolveUserButton.addEventListener('click', async () => {
+  await resolveUploadUser();
+});
+
 uploadForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   hideNotice();
 
-  const userID = normalizeUserID(uploadUserID.value);
+  let userID = normalizeUserID(uploadUserID.value);
+  const email = normalizeEmail(userEmail.value);
   const file = avatarFile.files[0];
+
+  const emailError = validateEmail(email);
+  if (emailError) {
+    showNotice(emailError, 'error');
+    return;
+  }
+
+  if (!userID) {
+    userID = await resolveUploadUser();
+    if (!userID) {
+      return;
+    }
+  }
 
   const userIDError = validateUserID(userID);
   if (userIDError) {
@@ -182,6 +220,7 @@ uploadForm.addEventListener('submit', async (event) => {
 
     showNotice('Аватарка отправлена на обработку', 'success');
     galleryUserID.value = data?.user_id || userID;
+    galleryEmail.value = email;
     activateTab('gallery');
     await loadGallery(data?.user_id || userID);
   } catch (error) {
@@ -204,6 +243,25 @@ loadGalleryButton.addEventListener('click', async () => {
   await loadGallery(userID);
 });
 
+resolveGalleryButton.addEventListener('click', async () => {
+  const email = normalizeEmail(galleryEmail.value);
+  const emailError = validateEmail(email);
+
+  if (emailError) {
+    renderEmptyState(emailError);
+    return;
+  }
+
+  const user = await resolveUserByEmail(email);
+  if (!user) {
+    return;
+  }
+
+  galleryEmail.value = user.email;
+  galleryUserID.value = user.user_id || user.id;
+  await loadGallery(user.user_id || user.id);
+});
+
 async function checkHealth() {
   try {
     const response = await fetch('/health');
@@ -213,6 +271,58 @@ async function checkHealth() {
     apiStatus.textContent = 'API недоступен';
     apiStatus.classList.remove('is-ok');
   }
+}
+
+async function resolveUploadUser() {
+  const email = normalizeEmail(userEmail.value);
+  const emailError = validateEmail(email);
+
+  if (emailError) {
+    showNotice(emailError, 'error');
+    return '';
+  }
+
+  setResolveLoading(true);
+
+  try {
+    const user = await resolveUserByEmail(email);
+    if (!user) {
+      showNotice('Не удалось получить UUID пользователя', 'error');
+      return '';
+    }
+
+    const userID = user.user_id || user.id;
+    userEmail.value = user.email;
+    uploadUserID.value = userID;
+    galleryEmail.value = user.email;
+    galleryUserID.value = userID;
+    showNotice(`UUID пользователя: ${userID}`, 'success');
+    return userID;
+  } catch (error) {
+    showNotice(`Ошибка сети: ${error.message}`, 'error');
+    return '';
+  } finally {
+    setResolveLoading(false);
+  }
+}
+
+async function resolveUserByEmail(email) {
+  const response = await fetch('/api/v1/users/resolve', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ email })
+  });
+  const data = await readResponse(response);
+  renderApiResponse(response, data);
+
+  if (!response.ok) {
+    activateTab('response');
+    return null;
+  }
+
+  return data;
 }
 
 async function loadGallery(userID) {
@@ -339,6 +449,22 @@ function normalizeUserID(value) {
   return value.trim().toLowerCase();
 }
 
+function normalizeEmail(value) {
+  return value.trim().toLowerCase();
+}
+
+function validateEmail(value) {
+  if (!value) {
+    return 'Укажите email пользователя';
+  }
+
+  if (value.length > 254 || /\s/.test(value) || !/^[^@]+@[^@]+\.[^@]+$/.test(value)) {
+    return 'Укажите корректный email пользователя';
+  }
+
+  return '';
+}
+
 function validateUserID(value) {
   if (!value) {
     return 'Укажите user_id пользователя';
@@ -417,6 +543,12 @@ function activateTab(name) {
 function setUploadLoading(isLoading) {
   uploadButton.disabled = isLoading;
   uploadButton.textContent = isLoading ? 'Загрузка' : 'Загрузить';
+}
+
+function setResolveLoading(isLoading) {
+  resolveUserButton.disabled = isLoading;
+  resolveGalleryButton.disabled = isLoading;
+  resolveUserButton.textContent = isLoading ? 'Получение' : 'Получить UUID';
 }
 
 function showNotice(message, type) {
