@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/squaredbusinessman/GophProfile/internal/domain/avatar"
+	"github.com/squaredbusinessman/GophProfile/internal/domain/user"
 	storages3 "github.com/squaredbusinessman/GophProfile/internal/storage/s3"
 )
 
@@ -23,11 +24,16 @@ type AvatarReadRepository interface {
 	ListAvatarsByUser(ctx context.Context, userID string, limit int, offset int) ([]avatar.Avatar, error)
 }
 
+type UserEmailLookup interface {
+	GetUserByEmail(ctx context.Context, email string) (user.User, error)
+}
+
 type AvatarObjectReader interface {
 	Get(ctx context.Context, key string) (io.ReadCloser, storages3.ObjectMetadata, error)
 }
 
 type AvatarReadService struct {
+	users   UserEmailLookup
 	avatars AvatarReadRepository
 	objects AvatarObjectReader
 }
@@ -57,6 +63,15 @@ func NewAvatarReadService(avatars AvatarReadRepository, objects AvatarObjectRead
 	}
 }
 
+// NewAvatarReadServiceWithUsers создает service чтения avatar с поиском пользователя по email
+func NewAvatarReadServiceWithUsers(users UserEmailLookup, avatars AvatarReadRepository, objects AvatarObjectReader) *AvatarReadService {
+	return &AvatarReadService{
+		users:   users,
+		avatars: avatars,
+		objects: objects,
+	}
+}
+
 // GetAvatarByID возвращает stream avatar object по avatar id
 func (s *AvatarReadService) GetAvatarByID(ctx context.Context, avatarID string, size string, format string) (AvatarReadResult, error) {
 	item, err := s.avatars.GetAvatar(ctx, avatarID)
@@ -81,6 +96,23 @@ func (s *AvatarReadService) GetLatestAvatarByUserID(ctx context.Context, userID 
 	}
 
 	return s.getAvatarObject(ctx, items[0], size, format)
+}
+
+// GetLatestAvatarByEmail возвращает stream последней активной avatar через сопоставление email с user_id
+func (s *AvatarReadService) GetLatestAvatarByEmail(ctx context.Context, email string, size string, format string) (AvatarReadResult, error) {
+	if s.users == nil {
+		return AvatarReadResult{}, fmt.Errorf("user email lookup is not configured")
+	}
+
+	owner, err := s.users.GetUserByEmail(ctx, email)
+	if err != nil {
+		if errors.Is(err, user.ErrNotFound) {
+			return AvatarReadResult{}, ErrAvatarNotFound
+		}
+		return AvatarReadResult{}, fmt.Errorf("get user by email: %w", err)
+	}
+
+	return s.GetLatestAvatarByUserID(ctx, owner.ID, size, format)
 }
 
 // GetAvatarMetadata возвращает metadata активной avatar по id

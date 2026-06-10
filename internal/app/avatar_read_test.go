@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/squaredbusinessman/GophProfile/internal/domain/avatar"
+	"github.com/squaredbusinessman/GophProfile/internal/domain/user"
 	storages3 "github.com/squaredbusinessman/GophProfile/internal/storage/s3"
 )
 
@@ -121,6 +122,54 @@ func TestGetLatestAvatarByUserIDUsesLatestActiveAvatar(t *testing.T) {
 	}
 }
 
+// TestGetLatestAvatarByEmailResolvesUserID проверяет сопоставление email с user_id
+func TestGetLatestAvatarByEmailResolvesUserID(t *testing.T) {
+	service := NewAvatarReadServiceWithUsers(
+		&fakeUserEmailLookup{item: user.User{ID: "user-1", Email: "user@example.com"}},
+		&fakeAvatarReadRepository{
+			items: []avatar.Avatar{
+				{
+					ID:                "avatar-1",
+					UserID:            "user-1",
+					MimeType:          "image/png",
+					Status:            avatar.StatusReady,
+					OriginalObjectKey: "avatars/user-1/avatar-1/original",
+				},
+			},
+		},
+		&fakeAvatarObjectReader{
+			body: []byte("original"),
+			metadata: storages3.ObjectMetadata{
+				ContentType: "image/png",
+				Size:        8,
+			},
+		},
+	)
+
+	result, err := service.GetLatestAvatarByEmail(context.Background(), "user@example.com", "original", "png")
+	if err != nil {
+		t.Fatalf("GetLatestAvatarByEmail returned error: %v", err)
+	}
+	defer result.Body.Close()
+	if result.ContentType != "image/png" {
+		t.Fatalf("ContentType = %q, want image/png", result.ContentType)
+	}
+}
+
+// TestGetLatestAvatarByEmailMapsMissingUser проверяет отсутствие пользователя по email
+func TestGetLatestAvatarByEmailMapsMissingUser(t *testing.T) {
+	service := NewAvatarReadServiceWithUsers(
+		&fakeUserEmailLookup{err: user.ErrNotFound},
+		&fakeAvatarReadRepository{},
+		&fakeAvatarObjectReader{},
+	)
+
+	_, err := service.GetLatestAvatarByEmail(context.Background(), "missing@example.com", "original", "")
+	if !errors.Is(err, ErrAvatarNotFound) {
+		t.Fatalf("error = %v, want ErrAvatarNotFound", err)
+	}
+}
+
 // TestGetAvatarMetadataMapsNotFound проверяет ошибку отсутствующей avatar
 func TestGetAvatarMetadataMapsNotFound(t *testing.T) {
 	service := NewAvatarReadService(&fakeAvatarReadRepository{
@@ -189,6 +238,19 @@ func (f *fakeAvatarReadRepository) ListAvatarsByUser(ctx context.Context, userID
 		return nil, f.err
 	}
 	return f.items, nil
+}
+
+type fakeUserEmailLookup struct {
+	item user.User
+	err  error
+}
+
+// GetUserByEmail возвращает fake пользователя по email
+func (f *fakeUserEmailLookup) GetUserByEmail(ctx context.Context, email string) (user.User, error) {
+	if f.err != nil {
+		return user.User{}, f.err
+	}
+	return f.item, nil
 }
 
 type fakeAvatarObjectReader struct {

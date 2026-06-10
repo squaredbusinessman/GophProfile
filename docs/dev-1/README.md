@@ -77,6 +77,7 @@ file: binary
 Ограничения:
 
 - `X-User-ID` обязателен и должен содержать внутренний UUID пользователя
+- Пользователь с таким UUID должен существовать и быть активным
 - `file` обязателен
 - Максимальный размер файла `10MB`
 - Форматы `JPEG`, `PNG`, `WebP` опционально
@@ -104,6 +105,14 @@ file: binary
 }
 ```
 
+Ответ `404`:
+
+```json
+{
+  "error": "User not found"
+}
+```
+
 Ответ `413`:
 
 ```json
@@ -118,6 +127,7 @@ file: binary
 ```http
 GET /api/v1/avatars/{avatar_id}
 GET /api/v1/users/{user_id}/avatar
+GET /api/v1/avatar?email={email}
 ```
 
 Query-параметры опционально:
@@ -138,6 +148,14 @@ format: string, values: "jpeg", "png", "webp"
 
 ```http
 GET /api/v1/avatars/{avatar_id}?size=300x300&format=png
+```
+
+Публичный lookup по email сначала находит активного пользователя через
+`users.email`, затем использует внутренний `users.id` для поиска последней
+активной avatar:
+
+```http
+GET /api/v1/avatar?email=user@example.com&size=100x100
 ```
 
 Ответ `200`:
@@ -161,6 +179,9 @@ ETag: "hash"
   "error": "Avatar not found"
 }
 ```
+
+Для публичного lookup по email отсутствующий пользователь или отсутствующая
+avatar возвращают стандартную PNG-заглушку с `200 OK`.
 
 Ответ `409`:
 
@@ -431,9 +452,9 @@ CREATE INDEX idx_outbox_events_pending_created_at
 ```
 
 Текущие защищенные API работают с внутренним UUID пользователя из `users.id`.
-Email хранится как атрибут пользователя и может использоваться позже для
-отдельного публичного lookup avatar, но не участвует в upload/delete/list
-контрактах.
+Email хранится как атрибут пользователя и используется только для публичного
+lookup avatar: входной email сопоставляется с `users.id`, после чего API
+работает с avatar по внутреннему `user_id`.
 
 После успешной загрузки original в S3 запись `avatars` и событие
 `outbox_events` создаются в одной транзакции. API делает best-effort publish в

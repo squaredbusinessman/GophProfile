@@ -3,6 +3,7 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -50,6 +51,7 @@ type AvatarUploader interface {
 type AvatarReader interface {
 	GetAvatarByID(ctx context.Context, avatarID string, size string, format string) (app.AvatarReadResult, error)
 	GetLatestAvatarByUserID(ctx context.Context, userID string, size string, format string) (app.AvatarReadResult, error)
+	GetLatestAvatarByEmail(ctx context.Context, email string, size string, format string) (app.AvatarReadResult, error)
 	GetAvatarMetadata(ctx context.Context, avatarID string) (app.AvatarMetadataResult, error)
 	ListAvatarsByUserID(ctx context.Context, userID string, limit int, offset int) (app.AvatarListResult, error)
 }
@@ -72,6 +74,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	}
 
 	router.mux.HandleFunc("/health", router.handleHealth)
+	router.mux.HandleFunc("/api/v1/avatar", router.handlePublicAvatarByEmail)
 	router.mux.HandleFunc("/api/v1/avatars", router.handleAvatars)
 	router.mux.HandleFunc("/api/v1/avatars/", router.handleAvatarByID)
 	router.mux.HandleFunc("/api/v1/users/", router.handleUsers)
@@ -142,6 +145,44 @@ func (r *Router) handleAvatars(w http.ResponseWriter, req *http.Request) {
 	r.handleAvatarUpload(w, req)
 }
 
+// handlePublicAvatarByEmail возвращает avatar через публичный lookup по email
+func (r *Router) handlePublicAvatarByEmail(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{
+			"error": "method not allowed",
+		})
+		return
+	}
+	if r.avatarReader == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "avatar reader is not configured",
+		})
+		return
+	}
+
+	email, err := validateLookupEmail(req.URL.Query().Get("email"))
+	if err != nil {
+		writeValidationError(w, err)
+		return
+	}
+
+	result, err := r.avatarReaderResult(req, func(ctx context.Context, size string, format string) (app.AvatarReadResult, error) {
+		return r.avatarReader.GetLatestAvatarByEmail(ctx, email, size, format)
+	})
+	if err != nil {
+		if errors.Is(err, app.ErrAvatarNotFound) {
+			writeDefaultAvatar(w)
+			return
+		}
+		writeAvatarReadError(w, err)
+		return
+	}
+	defer result.Body.Close()
+
+	writeAvatarBinary(w, result)
+}
+
 // handleAvatarUpload принимает multipart avatar и запускает обработку
 func (r *Router) handleAvatarUpload(w http.ResponseWriter, req *http.Request) {
 	if r.avatarUploader == nil {
@@ -197,9 +238,7 @@ func (r *Router) handleAvatarUpload(w http.ResponseWriter, req *http.Request) {
 	})
 	if err != nil {
 		r.logger.Error().Err(err).Msg("avatar upload failed")
-		writeJSON(w, http.StatusInternalServerError, map[string]string{
-			"error": "Avatar upload failed",
-		})
+		writeAvatarUploadError(w, err)
 		return
 	}
 
@@ -516,6 +555,16 @@ func writeAvatarReadError(w http.ResponseWriter, err error) {
 	}
 }
 
+// writeAvatarUploadError записывает HTTP-ответ для ошибки upload avatar
+func writeAvatarUploadError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, app.ErrUserNotFound):
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "User not found"})
+	default:
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Avatar upload failed"})
+	}
+}
+
 // writeAvatarDeleteError записывает HTTP-ответ для ошибки удаления avatar
 func writeAvatarDeleteError(w http.ResponseWriter, err error) {
 	switch {
@@ -540,6 +589,22 @@ func writeAvatarBinary(w http.ResponseWriter, result app.AvatarReadResult) {
 	}
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.Copy(w, result.Body)
+}
+
+// writeDefaultAvatar записывает стандартную PNG-заглушку avatar
+func writeDefaultAvatar(w http.ResponseWriter) {
+	body, err := base64.StdEncoding.DecodeString(defaultAvatarPNGBase64)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Default avatar unavailable"})
+		return
+	}
+
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "max-age=300")
+	w.Header().Set("ETag", "default-avatar-v1")
+	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(body)
 }
 
 // paginationParams читает limit и offset с безопасными дефолтами

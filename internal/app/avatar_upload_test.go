@@ -10,6 +10,7 @@ import (
 
 	"github.com/squaredbusinessman/GophProfile/internal/domain/avatar"
 	"github.com/squaredbusinessman/GophProfile/internal/domain/outbox"
+	"github.com/squaredbusinessman/GophProfile/internal/domain/user"
 	queuekafka "github.com/squaredbusinessman/GophProfile/internal/queue/kafka"
 )
 
@@ -21,7 +22,7 @@ func TestUploadAvatarStoresOriginalCreatesAvatarAndPublishesEvent(t *testing.T) 
 	avatarOutbox := &fakeAvatarOutboxStore{}
 	objects := &fakeObjectStore{}
 	publisher := &fakeEventPublisher{}
-	service := NewAvatarUploadService(avatarOutbox, objects, publisher)
+	service := NewAvatarUploadService(&fakeUserLookup{item: user.User{ID: uploadTestUserID}}, avatarOutbox, objects, publisher)
 	service.now = func() time.Time { return now }
 
 	result, err := service.UploadAvatar(context.Background(), AvatarUploadRequest{
@@ -70,6 +71,7 @@ func TestUploadAvatarStoresOriginalCreatesAvatarAndPublishesEvent(t *testing.T) 
 func TestUploadAvatarDoesNotCreateDBRecordWhenS3Fails(t *testing.T) {
 	avatarOutbox := &fakeAvatarOutboxStore{}
 	service := NewAvatarUploadService(
+		&fakeUserLookup{item: user.User{ID: uploadTestUserID}},
 		avatarOutbox,
 		&fakeObjectStore{putErr: errors.New("s3 down")},
 		&fakeEventPublisher{},
@@ -94,6 +96,7 @@ func TestUploadAvatarKeepsOutboxPendingWhenPublishFails(t *testing.T) {
 	avatarOutbox := &fakeAvatarOutboxStore{}
 	publisher := &fakeEventPublisher{publishErr: errors.New("kafka down")}
 	service := NewAvatarUploadService(
+		&fakeUserLookup{item: user.User{ID: uploadTestUserID}},
 		avatarOutbox,
 		&fakeObjectStore{},
 		publisher,
@@ -113,6 +116,43 @@ func TestUploadAvatarKeepsOutboxPendingWhenPublishFails(t *testing.T) {
 	if publisher.publishCalls != 1 {
 		t.Fatalf("publishCalls = %d, want best effort single publish", publisher.publishCalls)
 	}
+}
+
+// TestUploadAvatarReturnsUserNotFound проверяет отсутствие пользователя по UUID
+func TestUploadAvatarReturnsUserNotFound(t *testing.T) {
+	avatarOutbox := &fakeAvatarOutboxStore{}
+	objects := &fakeObjectStore{}
+	service := NewAvatarUploadService(
+		&fakeUserLookup{err: user.ErrNotFound},
+		avatarOutbox,
+		objects,
+		&fakeEventPublisher{},
+	)
+
+	_, err := service.UploadAvatar(context.Background(), AvatarUploadRequest{
+		UserID:      uploadTestUserID,
+		ContentType: "image/png",
+		Reader:      bytes.NewReader([]byte("payload")),
+	})
+	if !errors.Is(err, ErrUserNotFound) {
+		t.Fatalf("error = %v, want ErrUserNotFound", err)
+	}
+	if objects.putCalled || avatarOutbox.createCalled {
+		t.Fatal("upload should stop before S3 and DB for missing user")
+	}
+}
+
+type fakeUserLookup struct {
+	item user.User
+	err  error
+}
+
+// GetUser возвращает fake пользователя по UUID
+func (f *fakeUserLookup) GetUser(ctx context.Context, id string) (user.User, error) {
+	if f.err != nil {
+		return user.User{}, f.err
+	}
+	return f.item, nil
 }
 
 type fakeAvatarOutboxStore struct {

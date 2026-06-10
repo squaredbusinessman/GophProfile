@@ -83,6 +83,25 @@ func TestAvatarUploadRejectsMissingUserID(t *testing.T) {
 	}
 }
 
+// TestAvatarUploadReturnsNotFoundForMissingUser проверяет 404 для неизвестного user_id
+func TestAvatarUploadReturnsNotFoundForMissingUser(t *testing.T) {
+	handler := NewRouter(RouterConfig{
+		ServiceName:    "gophprofile",
+		Version:        "test",
+		Logger:         zerolog.Nop(),
+		AvatarUploader: &fakeAvatarUploader{err: app.ErrUserNotFound},
+	})
+
+	req := validAvatarUploadHTTPRequest(t, testUserID)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+}
+
 // TestAvatarUploadReturnsUnavailableWithoutService проверяет отсутствие upload service
 func TestAvatarUploadReturnsUnavailableWithoutService(t *testing.T) {
 	handler := NewRouter(RouterConfig{

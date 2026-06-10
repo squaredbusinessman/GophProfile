@@ -120,6 +120,86 @@ func TestAvatarReadReturnsNotFound(t *testing.T) {
 	}
 }
 
+// TestPublicAvatarByEmailReturnsBinary проверяет публичный lookup avatar по email
+func TestPublicAvatarByEmailReturnsBinary(t *testing.T) {
+	reader := &fakeAvatarReader{
+		result: app.AvatarReadResult{
+			Body:        io.NopCloser(strings.NewReader("image")),
+			ContentType: "image/png",
+			Size:        5,
+		},
+	}
+	handler := NewRouter(RouterConfig{
+		ServiceName:  "gophprofile",
+		Version:      "test",
+		Logger:       zerolog.Nop(),
+		AvatarReader: reader,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/avatar?email=User%40Example.COM&size=original&format=png", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if rec.Body.String() != "image" {
+		t.Fatalf("body = %q, want image", rec.Body.String())
+	}
+	if reader.email != "user@example.com" || reader.size != "original" || reader.format != "png" {
+		t.Fatalf("reader args = %q %q %q, want normalized email original png", reader.email, reader.size, reader.format)
+	}
+}
+
+// TestPublicAvatarByEmailReturnsDefaultForMissingUser проверяет заглушку для неизвестного email
+func TestPublicAvatarByEmailReturnsDefaultForMissingUser(t *testing.T) {
+	reader := &fakeAvatarReader{err: app.ErrAvatarNotFound}
+	handler := NewRouter(RouterConfig{
+		ServiceName:  "gophprofile",
+		Version:      "test",
+		Logger:       zerolog.Nop(),
+		AvatarReader: reader,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/avatar?email=missing%40example.com", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if got := rec.Header().Get("Content-Type"); got != "image/png" {
+		t.Fatalf("Content-Type = %q, want image/png", got)
+	}
+	if got := rec.Header().Get("ETag"); got != "default-avatar-v1" {
+		t.Fatalf("ETag = %q, want default-avatar-v1", got)
+	}
+	if rec.Body.Len() == 0 {
+		t.Fatal("default avatar body should not be empty")
+	}
+}
+
+// TestPublicAvatarByEmailRequiresEmail проверяет обязательный email query
+func TestPublicAvatarByEmailRequiresEmail(t *testing.T) {
+	handler := NewRouter(RouterConfig{
+		ServiceName:  "gophprofile",
+		Version:      "test",
+		Logger:       zerolog.Nop(),
+		AvatarReader: &fakeAvatarReader{},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/avatar", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
 // TestAvatarMetadataReturnsReadyJSON проверяет metadata готовой avatar
 func TestAvatarMetadataReturnsReadyJSON(t *testing.T) {
 	width := 640
@@ -301,6 +381,7 @@ func TestUserAvatarListReturnsPagination(t *testing.T) {
 type fakeAvatarReader struct {
 	avatarID         string
 	userID           string
+	email            string
 	metadataAvatarID string
 	listUserID       string
 	size             string
@@ -327,6 +408,17 @@ func (f *fakeAvatarReader) GetAvatarByID(ctx context.Context, avatarID string, s
 // GetLatestAvatarByUserID запоминает fake user id запрос
 func (f *fakeAvatarReader) GetLatestAvatarByUserID(ctx context.Context, userID string, size string, format string) (app.AvatarReadResult, error) {
 	f.userID = userID
+	f.size = size
+	f.format = format
+	if f.err != nil {
+		return app.AvatarReadResult{}, f.err
+	}
+	return f.result, nil
+}
+
+// GetLatestAvatarByEmail запоминает fake email lookup запрос
+func (f *fakeAvatarReader) GetLatestAvatarByEmail(ctx context.Context, email string, size string, format string) (app.AvatarReadResult, error) {
+	f.email = email
 	f.size = size
 	f.format = format
 	if f.err != nil {

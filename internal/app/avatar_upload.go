@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"time"
@@ -11,9 +12,16 @@ import (
 	"github.com/google/uuid"
 	"github.com/squaredbusinessman/GophProfile/internal/domain/avatar"
 	"github.com/squaredbusinessman/GophProfile/internal/domain/outbox"
+	"github.com/squaredbusinessman/GophProfile/internal/domain/user"
 	queuekafka "github.com/squaredbusinessman/GophProfile/internal/queue/kafka"
 	storages3 "github.com/squaredbusinessman/GophProfile/internal/storage/s3"
 )
+
+var ErrUserNotFound = errors.New("user not found")
+
+type UserLookup interface {
+	GetUser(ctx context.Context, id string) (user.User, error)
+}
 
 type AvatarOutboxStore interface {
 	CreateAvatarWithOutbox(ctx context.Context, item avatar.Avatar, event outbox.Event) error
@@ -30,6 +38,7 @@ type EventPublisher interface {
 }
 
 type AvatarUploadService struct {
+	users        UserLookup
 	avatarOutbox AvatarOutboxStore
 	objects      ObjectStore
 	publisher    EventPublisher
@@ -70,8 +79,9 @@ type AvatarProcessEvent struct {
 }
 
 // NewAvatarUploadService создает service загрузки avatar
-func NewAvatarUploadService(avatarOutbox AvatarOutboxStore, objects ObjectStore, publisher EventPublisher) *AvatarUploadService {
+func NewAvatarUploadService(users UserLookup, avatarOutbox AvatarOutboxStore, objects ObjectStore, publisher EventPublisher) *AvatarUploadService {
 	return &AvatarUploadService{
+		users:        users,
 		avatarOutbox: avatarOutbox,
 		objects:      objects,
 		publisher:    publisher,
@@ -81,16 +91,23 @@ func NewAvatarUploadService(avatarOutbox AvatarOutboxStore, objects ObjectStore,
 
 // UploadAvatar сохраняет original в S3 и атомарно создает avatar с outbox событием
 func (s *AvatarUploadService) UploadAvatar(ctx context.Context, req AvatarUploadRequest) (AvatarUploadResult, error) {
-	if s.avatarOutbox == nil || s.objects == nil || s.publisher == nil {
+	if s.users == nil || s.avatarOutbox == nil || s.objects == nil || s.publisher == nil {
 		return AvatarUploadResult{}, fmt.Errorf("avatar upload service is not configured")
 	}
 
 	now := s.now().UTC()
+	owner, err := s.users.GetUser(ctx, req.UserID)
+	if err != nil {
+		if errors.Is(err, user.ErrNotFound) {
+			return AvatarUploadResult{}, ErrUserNotFound
+		}
+		return AvatarUploadResult{}, fmt.Errorf("get upload user: %w", err)
+	}
 
 	avatarID := uuid.NewString()
-	originalKey := storages3.OriginalObjectKey(req.UserID, avatarID)
-	thumb100Key := storages3.Thumb100ObjectKey(req.UserID, avatarID)
-	thumb300Key := storages3.Thumb300ObjectKey(req.UserID, avatarID)
+	originalKey := storages3.OriginalObjectKey(owner.ID, avatarID)
+	thumb100Key := storages3.Thumb100ObjectKey(owner.ID, avatarID)
+	thumb300Key := storages3.Thumb300ObjectKey(owner.ID, avatarID)
 
 	body, err := io.ReadAll(req.Reader)
 	if err != nil {
@@ -107,7 +124,7 @@ func (s *AvatarUploadService) UploadAvatar(ctx context.Context, req AvatarUpload
 
 	item := avatar.Avatar{
 		ID:                avatarID,
-		UserID:            req.UserID,
+		UserID:            owner.ID,
 		FileName:          req.FileName,
 		MimeType:          req.ContentType,
 		SizeBytes:         size,
@@ -120,7 +137,7 @@ func (s *AvatarUploadService) UploadAvatar(ctx context.Context, req AvatarUpload
 	}
 	event := AvatarProcessEvent{
 		AvatarID:          avatarID,
-		UserID:            req.UserID,
+		UserID:            owner.ID,
 		OriginalObjectKey: originalKey,
 		Thumb100ObjectKey: thumb100Key,
 		Thumb300ObjectKey: thumb300Key,
@@ -149,7 +166,7 @@ func (s *AvatarUploadService) UploadAvatar(ctx context.Context, req AvatarUpload
 
 	return AvatarUploadResult{
 		ID:                avatarID,
-		UserID:            req.UserID,
+		UserID:            owner.ID,
 		FileName:          req.FileName,
 		ContentType:       req.ContentType,
 		Size:              size,
