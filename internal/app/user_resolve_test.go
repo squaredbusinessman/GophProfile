@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -33,6 +35,32 @@ func TestResolveUserByEmailReturnsStableUser(t *testing.T) {
 	}
 	if result.ID != "6f3f3c2d-df58-4e64-91ea-cdf90f4c9c1e" || result.Email != "user@example.com" {
 		t.Fatalf("result = %#v, want user identity", result)
+	}
+}
+
+// TestResolveUserByEmailRequiresRepository проверяет обязательность user repository
+func TestResolveUserByEmailRequiresRepository(t *testing.T) {
+	service := NewUserResolveService(nil)
+
+	_, err := service.ResolveUserByEmail(context.Background(), "user@example.com")
+	if err == nil {
+		t.Fatal("ResolveUserByEmail returned nil error, want error")
+	}
+}
+
+// TestResolveUserByEmailWrapsRepositoryError проверяет проброс ошибки repository
+func TestResolveUserByEmailWrapsRepositoryError(t *testing.T) {
+	repoErr := errors.New("postgres unavailable")
+	service := NewUserResolveService(&fakeUserEmailResolver{
+		err: repoErr,
+	})
+
+	_, err := service.ResolveUserByEmail(context.Background(), "user@example.com")
+	if !errors.Is(err, repoErr) {
+		t.Fatalf("error = %v, want wrapped repository error", err)
+	}
+	if !strings.Contains(err.Error(), "find or create user by email") {
+		t.Fatalf("error = %q, want operation context", err.Error())
 	}
 }
 

@@ -561,12 +561,16 @@ Unit-тесты:
 - Сервисные слои
 - Репозитории
 - Утилиты для работы с изображениями
+- Worker handler и delete flow
 
 Инструменты:
 
 - `go test` для unit-тестов
-- `testify/suite` для интеграционных тестов
-- `testcontainers-go` для тест-окружения
+- `go test ./... -coverprofile=coverage.out` для замера покрытия
+- `go tool cover -func=coverage.out` для отчета по функциям
+- `sqlmock` для быстрых repository unit-тестов без ручного PostgreSQL
+- `sh scripts/test-integration.sh` для repository integration тестов с PostgreSQL
+- `./scripts/local-up.sh` для локальной интеграционной проверки всего compose-стека
 - `golangci-lint` для статического анализа
 
 Цель покрытия:
@@ -574,6 +578,10 @@ Unit-тесты:
 ```text
 >50%
 ```
+
+Обычный test suite должен проходить без ручного поднятия внешних сервисов.
+Негативные сценарии обязательны для upload validation, HTTP handlers, worker
+idempotency, delete flow и storage error mapping.
 
 ## Докеризация
 
