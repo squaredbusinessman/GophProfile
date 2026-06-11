@@ -80,6 +80,40 @@ func TestAvatarReadByUserReturnsProcessing(t *testing.T) {
 	}
 }
 
+// TestAvatarReadByUserReturnsDefaultForMissingAvatar проверяет заглушку для пользователя без avatar
+func TestAvatarReadByUserReturnsDefaultForMissingAvatar(t *testing.T) {
+	defaultAvatar := NewDefaultAvatar([]byte("default-image"))
+	reader := &fakeAvatarReader{err: app.ErrAvatarNotFound}
+	handler := NewRouter(RouterConfig{
+		ServiceName:   "gophprofile",
+		Version:       "test",
+		Logger:        zerolog.Nop(),
+		DefaultAvatar: defaultAvatar,
+		AvatarReader:  reader,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/users/user-1/avatar?size=100x100&format=png", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if got := rec.Header().Get("Content-Type"); got != "image/png" {
+		t.Fatalf("Content-Type = %q, want image/png", got)
+	}
+	if got := rec.Header().Get("ETag"); got != defaultAvatar.ETag {
+		t.Fatalf("ETag = %q, want %q", got, defaultAvatar.ETag)
+	}
+	if rec.Body.String() != "default-image" {
+		t.Fatalf("body = %q, want default-image", rec.Body.String())
+	}
+	if reader.userID != "user-1" || reader.size != "100x100" || reader.format != "png" {
+		t.Fatalf("reader args = %q %q %q, want user-1 100x100 png", reader.userID, reader.size, reader.format)
+	}
+}
+
 // TestAvatarReadRejectsUnsupportedFormat проверяет 400 для неподдержанной конвертации
 func TestAvatarReadRejectsUnsupportedFormat(t *testing.T) {
 	reader := &fakeAvatarReader{err: app.ErrUnsupportedAvatarFormat}
@@ -154,12 +188,14 @@ func TestPublicAvatarByEmailReturnsBinary(t *testing.T) {
 
 // TestPublicAvatarByEmailReturnsDefaultForMissingUser проверяет заглушку для неизвестного email
 func TestPublicAvatarByEmailReturnsDefaultForMissingUser(t *testing.T) {
+	defaultAvatar := NewDefaultAvatar([]byte("default-image"))
 	reader := &fakeAvatarReader{err: app.ErrAvatarNotFound}
 	handler := NewRouter(RouterConfig{
-		ServiceName:  "gophprofile",
-		Version:      "test",
-		Logger:       zerolog.Nop(),
-		AvatarReader: reader,
+		ServiceName:   "gophprofile",
+		Version:       "test",
+		Logger:        zerolog.Nop(),
+		DefaultAvatar: defaultAvatar,
+		AvatarReader:  reader,
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/avatar?email=missing%40example.com", nil)
@@ -173,11 +209,11 @@ func TestPublicAvatarByEmailReturnsDefaultForMissingUser(t *testing.T) {
 	if got := rec.Header().Get("Content-Type"); got != "image/png" {
 		t.Fatalf("Content-Type = %q, want image/png", got)
 	}
-	if got := rec.Header().Get("ETag"); got != "default-avatar-v1" {
-		t.Fatalf("ETag = %q, want default-avatar-v1", got)
+	if got := rec.Header().Get("ETag"); got != defaultAvatar.ETag {
+		t.Fatalf("ETag = %q, want %q", got, defaultAvatar.ETag)
 	}
-	if rec.Body.Len() == 0 {
-		t.Fatal("default avatar body should not be empty")
+	if rec.Body.String() != "default-image" {
+		t.Fatalf("body = %q, want default-image", rec.Body.String())
 	}
 }
 

@@ -81,6 +81,7 @@ Object storage изолируется через [S3-слой](s3-storage.md).
 CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:5173
 API_RATE_LIMIT_RPS=20
 API_RATE_LIMIT_BURST=40
+DEFAULT_AVATAR_PATH=web/frontend/src/assets/default_avatar.png
 ```
 
 ## API
@@ -232,8 +233,9 @@ ETag: "hash"
 }
 ```
 
-Для публичного lookup по email отсутствующий пользователь или отсутствующая
-avatar возвращают стандартную PNG-заглушку с `200 OK`.
+Для публичного lookup по email и lookup последней avatar по `user_id`
+отсутствующий пользователь или отсутствующая avatar возвращают стандартную
+PNG-заглушку с `200 OK`.
 
 Ответ `409`:
 

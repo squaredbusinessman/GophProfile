@@ -6,8 +6,7 @@ import (
 )
 
 const (
-	maxLookupEmailLength   = 254
-	defaultAvatarPNGBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+	maxLookupEmailLength = 254
 )
 
 // validateLookupEmail проверяет email для публичного поиска avatar

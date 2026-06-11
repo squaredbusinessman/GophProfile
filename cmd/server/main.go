@@ -31,6 +31,11 @@ func main() {
 
 	logger := app.NewLogger(cfg)
 
+	defaultAvatar, err := httpapi.LoadDefaultAvatar(cfg.HTTP.DefaultAvatarPath)
+	if err != nil {
+		logger.Fatal().Err(err).Str("path", cfg.HTTP.DefaultAvatarPath).Msg("load default avatar")
+	}
+
 	db, err := sql.Open("pgx", cfg.Postgres.DSN)
 	if err != nil {
 		logger.Fatal().Err(err).Msg("open postgres connection pool")
@@ -68,6 +73,7 @@ func main() {
 		AllowedOrigins: cfg.HTTP.CORSAllowedOrigins,
 		RateLimitRPS:   cfg.HTTP.RateLimitRPS,
 		RateLimitBurst: cfg.HTTP.RateLimitBurst,
+		DefaultAvatar:  defaultAvatar,
 		HealthChecks: map[string]httpapi.HealthCheck{
 			"postgres": db.PingContext,
 			"s3":       s3Client.HealthCheck,

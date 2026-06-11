@@ -339,7 +339,7 @@ async function loadGallery(userID) {
       return;
     }
 
-    renderGallery(normalizeAvatarList(data));
+    renderGallery(normalizeAvatarList(data), userID);
   } catch (error) {
     renderEmptyState(`Ошибка сети: ${error.message}`);
   } finally {
@@ -347,11 +347,11 @@ async function loadGallery(userID) {
   }
 }
 
-function renderGallery(avatars) {
+function renderGallery(avatars, userID = '') {
   avatarList.innerHTML = '';
 
   if (!avatars.length) {
-    renderEmptyState('У пользователя пока нет аватарок');
+    renderDefaultAvatarState(userID);
     return;
   }
 
@@ -408,6 +408,37 @@ function renderGallery(avatars) {
     card.append(image, content);
     avatarList.append(card);
   });
+}
+
+function renderDefaultAvatarState(userID) {
+  avatarList.innerHTML = '';
+
+  const normalizedUserID = normalizeUserID(userID || galleryUserID.value);
+  if (!normalizedUserID) {
+    renderEmptyState('У пользователя пока нет аватарок');
+    return;
+  }
+
+  const state = document.createElement('div');
+  const image = document.createElement('img');
+  const content = document.createElement('div');
+  const title = document.createElement('p');
+  const text = document.createElement('p');
+
+  state.className = 'default-avatar-state';
+  image.className = 'default-avatar-state__image';
+  content.className = 'default-avatar-state__content';
+  title.className = 'default-avatar-state__title';
+  text.className = 'default-avatar-state__text';
+
+  image.src = `/api/v1/users/${encodeURIComponent(normalizedUserID)}/avatar?size=100x100&format=png`;
+  image.alt = 'Стандартная аватарка пользователя';
+  title.textContent = 'У пользователя пока нет аватарок';
+  text.textContent = 'У пользователя пока нет аватарки, поэтому отображается стандартная аватарка сервиса';
+
+  content.append(title, text);
+  state.append(image, content);
+  avatarList.append(state);
 }
 
 async function loadMetadata(avatarId) {

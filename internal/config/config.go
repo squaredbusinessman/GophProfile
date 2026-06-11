@@ -36,6 +36,7 @@ type HTTPConfig struct {
 	WriteTimeout       time.Duration
 	IdleTimeout        time.Duration
 	ShutdownTimeout    time.Duration
+	DefaultAvatarPath  string
 	CORSAllowedOrigins []string
 	RateLimitRPS       int
 	RateLimitBurst     int
@@ -119,6 +120,7 @@ func Load() Config {
 			WriteTimeout:       envDuration("HTTP_WRITE_TIMEOUT", 10*time.Second),
 			IdleTimeout:        envDuration("HTTP_IDLE_TIMEOUT", 60*time.Second),
 			ShutdownTimeout:    envDuration("HTTP_SHUTDOWN_TIMEOUT", 10*time.Second),
+			DefaultAvatarPath:  envString("DEFAULT_AVATAR_PATH", "web/frontend/src/assets/default_avatar.png"),
 			CORSAllowedOrigins: envCSV("CORS_ALLOWED_ORIGINS", splitCSV(defaultCORSAllowedOrigins)),
 			RateLimitRPS:       envInt("API_RATE_LIMIT_RPS", defaultRateLimitRPS),
 			RateLimitBurst:     envInt("API_RATE_LIMIT_BURST", defaultRateLimitBurst),

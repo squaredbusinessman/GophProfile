@@ -70,6 +70,7 @@ KAFKA_BROKERS=kafka:9092
 KAFKA_CLIENT_ID=gophprofile-server|gophprofile-worker
 KAFKA_CONSUMER_GROUP=gophprofile-avatar-worker
 HTTP_ADDR=:8080
+DEFAULT_AVATAR_PATH=/app/default_avatar.png
 CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:5173
 ```
 

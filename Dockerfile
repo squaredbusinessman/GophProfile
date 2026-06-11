@@ -21,6 +21,9 @@ RUN apk add --no-cache ca-certificates libstdc++
 
 COPY --from=build /out/server /app/server
 COPY --from=build /out/worker /app/worker
+COPY web/frontend/src/assets/default_avatar.png /app/default_avatar.png
+
+ENV DEFAULT_AVATAR_PATH=/app/default_avatar.png
 
 EXPOSE 8080
 

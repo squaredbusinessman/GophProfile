@@ -113,6 +113,7 @@ services:
     environment:
       APP_ENV: local
       HTTP_ADDR: :8080
+      DEFAULT_AVATAR_PATH: /app/default_avatar.png
       DATABASE_URL: postgres://gophprofile:gophprofile@postgres:5432/gophprofile?sslmode=disable
       KAFKA_BROKERS: kafka:9092
       KAFKA_CLIENT_ID: gophprofile-server

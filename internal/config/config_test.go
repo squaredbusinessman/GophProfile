@@ -15,6 +15,7 @@ func TestLoadUsesLocalDefaults(t *testing.T) {
 	t.Setenv("CORS_ALLOWED_ORIGINS", "")
 	t.Setenv("API_RATE_LIMIT_RPS", "")
 	t.Setenv("API_RATE_LIMIT_BURST", "")
+	t.Setenv("DEFAULT_AVATAR_PATH", "")
 	t.Setenv("DATABASE_URL", "")
 	t.Setenv("KAFKA_BROKERS", "")
 
@@ -34,6 +35,9 @@ func TestLoadUsesLocalDefaults(t *testing.T) {
 	}
 	if cfg.HTTP.RateLimitBurst != 40 {
 		t.Fatalf("HTTP.RateLimitBurst = %d, want 40", cfg.HTTP.RateLimitBurst)
+	}
+	if cfg.HTTP.DefaultAvatarPath != "web/frontend/src/assets/default_avatar.png" {
+		t.Fatalf("HTTP.DefaultAvatarPath = %q, want frontend asset path", cfg.HTTP.DefaultAvatarPath)
 	}
 	if cfg.Postgres.DSN == "" {
 		t.Fatal("Postgres.DSN should have a local default")
@@ -58,6 +62,7 @@ func TestLoadReadsEnvironment(t *testing.T) {
 	t.Setenv("CORS_ALLOWED_ORIGINS", "https://app.example.com, https://admin.example.com")
 	t.Setenv("API_RATE_LIMIT_RPS", "7")
 	t.Setenv("API_RATE_LIMIT_BURST", "9")
+	t.Setenv("DEFAULT_AVATAR_PATH", "/app/default_avatar.png")
 	t.Setenv("S3_USE_PATH_STYLE", "false")
 	t.Setenv("KAFKA_BROKERS", "localhost:19092, localhost:29092")
 	t.Setenv("OUTBOX_POLL_INTERVAL", "2s")
@@ -85,6 +90,9 @@ func TestLoadReadsEnvironment(t *testing.T) {
 	}
 	if cfg.HTTP.RateLimitBurst != 9 {
 		t.Fatalf("HTTP.RateLimitBurst = %d, want 9", cfg.HTTP.RateLimitBurst)
+	}
+	if cfg.HTTP.DefaultAvatarPath != "/app/default_avatar.png" {
+		t.Fatalf("HTTP.DefaultAvatarPath = %q, want configured path", cfg.HTTP.DefaultAvatarPath)
 	}
 	if cfg.S3.UsePathStyle {
 		t.Fatal("S3.UsePathStyle = true, want false")

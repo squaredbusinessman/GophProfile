@@ -3,7 +3,6 @@ package httpapi
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -33,6 +32,7 @@ type RouterConfig struct {
 	RateLimitRPS   int
 	RateLimitBurst int
 	HealthChecks   map[string]HealthCheck
+	DefaultAvatar  DefaultAvatar
 	UserResolver   UserResolver
 	AvatarUploader AvatarUploader
 	AvatarReader   AvatarReader
@@ -46,6 +46,7 @@ type Router struct {
 	cors           corsPolicy
 	rateLimiter    *clientRateLimiter
 	healthChecks   map[string]HealthCheck
+	defaultAvatar  DefaultAvatar
 	userResolver   UserResolver
 	avatarUploader AvatarUploader
 	avatarReader   AvatarReader
@@ -85,6 +86,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 		cors:           newCORSPolicy(cfg.AllowedOrigins),
 		rateLimiter:    newClientRateLimiter(cfg.RateLimitRPS, cfg.RateLimitBurst),
 		healthChecks:   cfg.HealthChecks,
+		defaultAvatar:  normalizeDefaultAvatar(cfg.DefaultAvatar),
 		userResolver:   cfg.UserResolver,
 		avatarUploader: cfg.AvatarUploader,
 		avatarReader:   cfg.AvatarReader,
@@ -221,7 +223,11 @@ func (r *Router) handlePublicAvatarByEmail(w http.ResponseWriter, req *http.Requ
 	})
 	if err != nil {
 		if errors.Is(err, app.ErrAvatarNotFound) {
-			writeDefaultAvatar(w)
+			if err := ensureDefaultAvatarRequest(req); err != nil {
+				writeAvatarReadError(w, err)
+				return
+			}
+			writeDefaultAvatar(w, r.defaultAvatar)
 			return
 		}
 		writeAvatarReadError(w, err)
@@ -453,6 +459,14 @@ func (r *Router) handleUsers(w http.ResponseWriter, req *http.Request) {
 		return r.avatarReader.GetLatestAvatarByUserID(ctx, userID, size, format)
 	})
 	if err != nil {
+		if errors.Is(err, app.ErrAvatarNotFound) {
+			if err := ensureDefaultAvatarRequest(req); err != nil {
+				writeAvatarReadError(w, err)
+				return
+			}
+			writeDefaultAvatar(w, r.defaultAvatar)
+			return
+		}
 		writeAvatarReadError(w, err)
 		return
 	}
@@ -716,19 +730,36 @@ func writeAvatarBinary(w http.ResponseWriter, result app.AvatarReadResult) {
 }
 
 // writeDefaultAvatar записывает стандартную PNG-заглушку avatar
-func writeDefaultAvatar(w http.ResponseWriter) {
-	body, err := base64.StdEncoding.DecodeString(defaultAvatarPNGBase64)
-	if err != nil {
+func writeDefaultAvatar(w http.ResponseWriter, item DefaultAvatar) {
+	if len(item.Body) == 0 {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Default avatar unavailable"})
 		return
 	}
 
-	w.Header().Set("Content-Type", "image/png")
-	w.Header().Set("Cache-Control", "max-age=300")
-	w.Header().Set("ETag", "default-avatar-v1")
-	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+	w.Header().Set("Content-Type", item.ContentType)
+	w.Header().Set("Cache-Control", item.CacheControl)
+	w.Header().Set("ETag", item.ETag)
+	w.Header().Set("Content-Length", strconv.Itoa(len(item.Body)))
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(body)
+	_, _ = w.Write(item.Body)
+}
+
+// ensureDefaultAvatarRequest проверяет query параметры для PNG-заглушки avatar
+func ensureDefaultAvatarRequest(req *http.Request) error {
+	size := strings.TrimSpace(strings.ToLower(req.URL.Query().Get("size")))
+	switch size {
+	case "", "original", "100x100", "300x300":
+	default:
+		return app.ErrUnsupportedAvatarSize
+	}
+
+	format := strings.TrimSpace(strings.ToLower(req.URL.Query().Get("format")))
+	switch format {
+	case "", "png":
+		return nil
+	default:
+		return app.ErrUnsupportedAvatarFormat
+	}
 }
 
 // paginationParams читает limit и offset с безопасными дефолтами
