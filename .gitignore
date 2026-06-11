@@ -27,6 +27,11 @@ dist/
 *.test
 *.out
 
+# Артефакты сборки фронтенда
+node_modules/
+web/static/
+web/frontend/dist/
+
 # Покрытие тестов и профилирование Go
 coverage.out
 coverage.html
@@ -44,6 +49,9 @@ go.work.sum
 tmp/
 temp/
 .cache/
+
+# Локальные рабочие материалы по ТЗ
+docs/.tz-work/
 
 # Локальные runtime-данные Docker
 docker-data/

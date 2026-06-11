@@ -1,0 +1,13 @@
+.git
+.idea
+.vscode
+docs/.tz-work
+web/frontend/node_modules
+web/static
+coverage.out
+coverage.html
+*.log
+tmp
+temp
+.cache
+docker-data
