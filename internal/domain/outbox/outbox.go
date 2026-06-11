@@ -28,8 +28,3 @@ type Event struct {
 	UpdatedAt   time.Time
 	PublishedAt *time.Time
 }
-
-// IsPublished возвращает признак успешной публикации события
-func (e Event) IsPublished() bool {
-	return e.Status == StatusPublished
-}

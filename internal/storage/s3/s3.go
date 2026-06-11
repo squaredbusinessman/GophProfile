@@ -21,13 +21,6 @@ var (
 	ErrInvalidConfig = errors.New("invalid s3 config")
 )
 
-type Store interface {
-	Put(ctx context.Context, key string, reader io.Reader, size int64, contentType string) error
-	Get(ctx context.Context, key string) (io.ReadCloser, ObjectMetadata, error)
-	Delete(ctx context.Context, key string) error
-	Exists(ctx context.Context, key string) (bool, error)
-}
-
 type Client struct {
 	bucket string
 	region string
@@ -81,11 +74,6 @@ func NewClient(cfg config.S3Config) (*Client, error) {
 	}
 
 	return newClientWithRegion(cfg.Bucket, cfg.Region, &minioAdapter{sdk: sdk}), nil
-}
-
-// newClientWithAPI создает S3 client поверх готового SDK-совместимого API
-func newClientWithAPI(bucket string, api objectStorageAPI) *Client {
-	return newClientWithRegion(bucket, "", api)
 }
 
 // newClientWithRegion создает S3 client с явно заданным region

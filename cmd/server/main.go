@@ -20,13 +20,14 @@ import (
 // main запускает HTTP-сервер приложения
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	cfg, err := app.LoadConfig(ctx)
 	if err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "load config: %v\n", err)
+		stop()
 		os.Exit(1)
 	}
+	defer stop()
 
 	logger := app.NewLogger(cfg)
 

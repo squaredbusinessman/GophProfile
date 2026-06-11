@@ -79,7 +79,7 @@ func ValidateAvatarUploadRequest(w http.ResponseWriter, req *http.Request) (*Val
 
 	file, err := fileHeader.Open()
 	if err != nil {
-		return nil, validationError(http.StatusBadRequest, "Invalid file", "Cannot open uploaded file")
+		return nil, validationError("Invalid file", "Cannot open uploaded file")
 	}
 	defer func() {
 		_ = file.Close()
@@ -90,7 +90,7 @@ func ValidateAvatarUploadRequest(w http.ResponseWriter, req *http.Request) (*Val
 		return nil, err
 	}
 	if magicContentType != contentType {
-		return nil, validationError(http.StatusBadRequest, "Invalid file format", "MIME type does not match file content")
+		return nil, validationError("Invalid file format", "MIME type does not match file content")
 	}
 
 	return &ValidatedAvatarUpload{
@@ -109,23 +109,23 @@ func parseMultipartError(err error) error {
 	if errors.As(err, &maxBytesError) {
 		return fileTooLargeError()
 	}
-	return validationError(http.StatusBadRequest, "Invalid multipart form", "Request must include multipart field file")
+	return validationError("Invalid multipart form", "Request must include multipart field file")
 }
 
 // requiredFileHeader возвращает обязательный multipart file header
 func requiredFileHeader(form *multipart.Form) (*multipart.FileHeader, error) {
 	if form == nil || form.File == nil {
-		return nil, validationError(http.StatusBadRequest, "Missing file", "Multipart field file is required")
+		return nil, validationError("Missing file", "Multipart field file is required")
 	}
 
 	files := form.File["file"]
 	if len(files) == 0 {
-		return nil, validationError(http.StatusBadRequest, "Missing file", "Multipart field file is required")
+		return nil, validationError("Missing file", "Multipart field file is required")
 	}
 
 	fileHeader := files[0]
 	if fileHeader.Size == 0 {
-		return nil, validationError(http.StatusBadRequest, "Invalid file format", "File is empty")
+		return nil, validationError("Invalid file format", "File is empty")
 	}
 	return fileHeader, nil
 }
@@ -134,15 +134,15 @@ func requiredFileHeader(form *multipart.Form) (*multipart.FileHeader, error) {
 func normalizeContentType(rawContentType string) (string, error) {
 	contentType := strings.TrimSpace(strings.ToLower(rawContentType))
 	if contentType == "" {
-		return "", validationError(http.StatusBadRequest, "Invalid file format", "Missing file Content-Type")
+		return "", validationError("Invalid file format", "Missing file Content-Type")
 	}
 
 	mediaType, _, err := mime.ParseMediaType(contentType)
 	if err != nil {
-		return "", validationError(http.StatusBadRequest, "Invalid file format", "Invalid file Content-Type")
+		return "", validationError("Invalid file format", "Invalid file Content-Type")
 	}
 	if !isAllowedImageContentType(mediaType) {
-		return "", validationError(http.StatusBadRequest, "Invalid file format", "Supported formats: jpeg, png, webp")
+		return "", validationError("Invalid file format", "Supported formats: jpeg, png, webp")
 	}
 	return mediaType, nil
 }
@@ -152,15 +152,15 @@ func detectImageContentType(reader io.Reader) (string, error) {
 	buffer := make([]byte, 512)
 	n, err := io.ReadFull(reader, buffer)
 	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
-		return "", validationError(http.StatusBadRequest, "Invalid file format", "Cannot read file header")
+		return "", validationError("Invalid file format", "Cannot read file header")
 	}
 	if n == 0 {
-		return "", validationError(http.StatusBadRequest, "Invalid file format", "File is empty")
+		return "", validationError("Invalid file format", "File is empty")
 	}
 
 	contentType := detectMagicContentType(buffer[:n])
 	if contentType == "" {
-		return "", validationError(http.StatusBadRequest, "Invalid file format", "Supported formats: jpeg, png, webp")
+		return "", validationError("Invalid file format", "Supported formats: jpeg, png, webp")
 	}
 	return contentType, nil
 }
@@ -209,9 +209,9 @@ func fileTooLargeError() error {
 }
 
 // validationError создает ошибку валидации для HTTP-ответа
-func validationError(statusCode int, message string, details string) error {
+func validationError(message string, details string) error {
 	return &ValidationError{
-		StatusCode: statusCode,
+		StatusCode: http.StatusBadRequest,
 		Message:    message,
 		Details:    details,
 	}

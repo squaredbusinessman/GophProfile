@@ -744,11 +744,11 @@ func writeValidationError(w http.ResponseWriter, err error) {
 func validateRequesterUserID(rawUserID string) (string, error) {
 	userID := strings.TrimSpace(rawUserID)
 	if userID == "" {
-		return "", validationError(http.StatusBadRequest, "Missing X-User-ID", "Header X-User-ID with user id is required")
+		return "", validationError("Missing X-User-ID", "Header X-User-ID with user id is required")
 	}
 	parsed, err := uuid.Parse(userID)
 	if err != nil {
-		return "", validationError(http.StatusBadRequest, "Invalid X-User-ID", "Header X-User-ID must contain user UUID")
+		return "", validationError("Invalid X-User-ID", "Header X-User-ID must contain user UUID")
 	}
 	return parsed.String(), nil
 }

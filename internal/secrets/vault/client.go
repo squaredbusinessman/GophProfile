@@ -112,8 +112,3 @@ type kv2Response struct {
 const (
 	httpStatusStandby = 429
 )
-
-// StatusStandby возвращает HTTP-статус standby-узла Vault
-func StatusStandby() int {
-	return httpStatusStandby
-}

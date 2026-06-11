@@ -16,8 +16,3 @@ type User struct {
 	UpdatedAt time.Time
 	DeletedAt *time.Time
 }
-
-// IsDeleted возвращает признак мягкого удаления пользователя
-func (u User) IsDeleted() bool {
-	return u.DeletedAt != nil
-}

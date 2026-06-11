@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -16,8 +17,10 @@ func RunWorker(ctx context.Context, cfg config.Config, logger zerolog.Logger, ou
 		Str("consumer_group", cfg.Kafka.ConsumerGroup).
 		Msg("worker started")
 
-	errCh := make(chan error, 1)
+	var consumerErrCh <-chan error
 	if processConsumer != nil && (avatarProcessor != nil || avatarDeleter != nil) {
+		errCh := make(chan error, 1)
+		consumerErrCh = errCh
 		go func() {
 			errCh <- consumeAvatarMessages(ctx, processConsumer, avatarProcessor, avatarDeleter)
 		}()
@@ -30,10 +33,10 @@ func RunWorker(ctx context.Context, cfg config.Config, logger zerolog.Logger, ou
 
 	for {
 		select {
-		case err := <-errCh:
+		case err := <-consumerErrCh:
 			return err
 		case <-ctx.Done():
-			return shutdownWorker(ctx, cfg, logger)
+			return shutdownWorker(ctx, cfg, logger, consumerErrCh)
 		case <-ticker.C:
 			publishPendingOutbox(ctx, cfg, logger, outboxPublisher)
 		}
@@ -67,17 +70,21 @@ func consumeAvatarMessages(ctx context.Context, consumer ProcessMessageConsumer,
 }
 
 // shutdownWorker выполняет graceful shutdown worker
-func shutdownWorker(ctx context.Context, cfg config.Config, logger zerolog.Logger) error {
-	shutdownTimer := time.NewTimer(cfg.Worker.ShutdownTimeout)
-	defer shutdownTimer.Stop()
-
+func shutdownWorker(ctx context.Context, cfg config.Config, logger zerolog.Logger, consumerErrCh <-chan error) error {
 	logger.Info().Dur("timeout", cfg.Worker.ShutdownTimeout).Msg("worker shutting down")
 
-	select {
-	case <-shutdownTimer.C:
-		return nil
-	default:
+	if consumerErrCh == nil {
 		return ctx.Err()
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.Worker.ShutdownTimeout)
+	defer cancel()
+
+	select {
+	case err := <-consumerErrCh:
+		return err
+	case <-shutdownCtx.Done():
+		return fmt.Errorf("worker shutdown timeout: %w", shutdownCtx.Err())
 	}
 }
 

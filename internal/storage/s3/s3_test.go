@@ -45,7 +45,7 @@ func TestObjectKeyBuildersEscapeUnsafeSegments(t *testing.T) {
 // TestPutDelegatesToObjectStorageAPI проверяет сохранение объекта через adapter
 func TestPutDelegatesToObjectStorageAPI(t *testing.T) {
 	api := &fakeObjectStorageAPI{}
-	client := newClientWithAPI("avatars", api)
+	client := newClientWithRegion("avatars", "", api)
 
 	err := client.Put(context.Background(), "avatars/user/avatar/original", strings.NewReader("image"), 5, "image/jpeg")
 	if err != nil {
@@ -79,7 +79,7 @@ func TestGetReturnsStreamAndMetadata(t *testing.T) {
 			LastModified: lastModified,
 		},
 	}
-	client := newClientWithAPI("avatars", api)
+	client := newClientWithRegion("avatars", "", api)
 
 	body, metadata, err := client.Get(context.Background(), "avatars/user/avatar/original")
 	if err != nil {
@@ -106,7 +106,7 @@ func TestDeleteIgnoresNotFound(t *testing.T) {
 	api := &fakeObjectStorageAPI{
 		removeErr: minio.ErrorResponse{Code: "NoSuchKey", StatusCode: http.StatusNotFound},
 	}
-	client := newClientWithAPI("avatars", api)
+	client := newClientWithRegion("avatars", "", api)
 
 	err := client.Delete(context.Background(), "avatars/user/avatar/original")
 	if err != nil {
@@ -119,7 +119,7 @@ func TestExistsReturnsFalseForNotFound(t *testing.T) {
 	api := &fakeObjectStorageAPI{
 		statErr: minio.ErrorResponse{Code: "NoSuchKey", StatusCode: http.StatusNotFound},
 	}
-	client := newClientWithAPI("avatars", api)
+	client := newClientWithRegion("avatars", "", api)
 
 	exists, err := client.Exists(context.Background(), "avatars/user/avatar/original")
 	if err != nil {
@@ -166,7 +166,7 @@ func TestGetMapsNotFoundToDomainError(t *testing.T) {
 	api := &fakeObjectStorageAPI{
 		statErr: minio.ErrorResponse{Code: "NoSuchKey", StatusCode: http.StatusNotFound},
 	}
-	client := newClientWithAPI("avatars", api)
+	client := newClientWithRegion("avatars", "", api)
 
 	_, _, err := client.Get(context.Background(), "avatars/user/avatar/original")
 	if !errors.Is(err, ErrNotFound) {
@@ -177,7 +177,7 @@ func TestGetMapsNotFoundToDomainError(t *testing.T) {
 // TestInvalidKeyRejectsAbsolutePath проверяет отказ для абсолютного object key
 func TestInvalidKeyRejectsAbsolutePath(t *testing.T) {
 	api := &fakeObjectStorageAPI{}
-	client := newClientWithAPI("avatars", api)
+	client := newClientWithRegion("avatars", "", api)
 
 	err := client.Put(context.Background(), "/avatars/user/avatar/original", strings.NewReader("image"), 5, "image/jpeg")
 	if !errors.Is(err, ErrInvalidKey) {

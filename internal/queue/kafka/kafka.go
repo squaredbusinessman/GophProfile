@@ -19,11 +19,8 @@ const (
 )
 
 type Client struct {
-	brokers       []string
-	clientID      string
-	consumerGroup string
-	producer      *confluent.Producer
-	consumer      *confluent.Consumer
+	producer *confluent.Producer
+	consumer *confluent.Consumer
 }
 
 type Message struct {
@@ -56,11 +53,8 @@ func NewClient(brokers []string, clientID string, consumerGroup string) (*Client
 	}
 
 	return &Client{
-		brokers:       append([]string(nil), brokers...),
-		clientID:      clientID,
-		consumerGroup: consumerGroup,
-		producer:      producer,
-		consumer:      consumer,
+		producer: producer,
+		consumer: consumer,
 	}, nil
 }
 
@@ -148,19 +142,4 @@ func (c *Client) Close() {
 	_ = c.consumer.Close()
 	c.producer.Flush(int((5 * time.Second).Milliseconds()))
 	c.producer.Close()
-}
-
-// Brokers возвращает список Kafka brokers
-func (c *Client) Brokers() []string {
-	return append([]string(nil), c.brokers...)
-}
-
-// ClientID возвращает Kafka client id
-func (c *Client) ClientID() string {
-	return c.clientID
-}
-
-// ConsumerGroup возвращает Kafka consumer group
-func (c *Client) ConsumerGroup() string {
-	return c.consumerGroup
 }
