@@ -32,6 +32,7 @@ type RouterConfig struct {
 	AllowedOrigins []string
 	RateLimitRPS   int
 	RateLimitBurst int
+	HealthChecks   map[string]HealthCheck
 	UserResolver   UserResolver
 	AvatarUploader AvatarUploader
 	AvatarReader   AvatarReader
@@ -44,12 +45,15 @@ type Router struct {
 	logger         zerolog.Logger
 	cors           corsPolicy
 	rateLimiter    *clientRateLimiter
+	healthChecks   map[string]HealthCheck
 	userResolver   UserResolver
 	avatarUploader AvatarUploader
 	avatarReader   AvatarReader
 	avatarDeleter  AvatarDeleter
 	mux            *http.ServeMux
 }
+
+type HealthCheck func(ctx context.Context) error
 
 type UserResolver interface {
 	ResolveUserByEmail(ctx context.Context, email string) (app.UserResolveResult, error)
@@ -80,6 +84,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 		logger:         cfg.Logger,
 		cors:           newCORSPolicy(cfg.AllowedOrigins),
 		rateLimiter:    newClientRateLimiter(cfg.RateLimitRPS, cfg.RateLimitBurst),
+		healthChecks:   cfg.HealthChecks,
 		userResolver:   cfg.UserResolver,
 		avatarUploader: cfg.AvatarUploader,
 		avatarReader:   cfg.AvatarReader,
@@ -137,7 +142,9 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		Msg("http request completed")
 }
 
-// handleHealth возвращает базовый healthcheck без внешних зависимостей
+const healthCheckTimeout = 2 * time.Second
+
+// handleHealth возвращает healthcheck приложения и внешних зависимостей
 func (r *Router) handleHealth(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
@@ -147,12 +154,30 @@ func (r *Router) handleHealth(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, HealthResponse{
-		Status:    "ok",
+	status := "ok"
+	statusCode := http.StatusOK
+	checks := make(map[string]string, len(r.healthChecks))
+
+	for name, check := range r.healthChecks {
+		checkCtx, cancel := context.WithTimeout(req.Context(), healthCheckTimeout)
+		err := check(checkCtx)
+		cancel()
+
+		if err != nil {
+			checks[name] = "error"
+			status = "degraded"
+			statusCode = http.StatusServiceUnavailable
+			continue
+		}
+		checks[name] = "ok"
+	}
+
+	writeJSON(w, statusCode, HealthResponse{
+		Status:    status,
 		Service:   r.serviceName,
 		Version:   r.version,
 		Timestamp: time.Now().UTC(),
-		Checks:    map[string]string{},
+		Checks:    checks,
 	})
 }
 

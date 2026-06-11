@@ -68,6 +68,11 @@ func main() {
 		AllowedOrigins: cfg.HTTP.CORSAllowedOrigins,
 		RateLimitRPS:   cfg.HTTP.RateLimitRPS,
 		RateLimitBurst: cfg.HTTP.RateLimitBurst,
+		HealthChecks: map[string]httpapi.HealthCheck{
+			"postgres": db.PingContext,
+			"s3":       s3Client.HealthCheck,
+			"kafka":    kafkaClient.HealthCheck,
+		},
 		UserResolver:   userResolveService,
 		AvatarUploader: avatarUploadService,
 		AvatarReader:   avatarReadService,

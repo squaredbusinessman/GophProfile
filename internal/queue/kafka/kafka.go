@@ -134,7 +134,21 @@ func (c *Client) Consume(ctx context.Context, topics []string, handler func(cont
 
 // HealthCheck проверяет доступность Kafka client
 func (c *Client) HealthCheck(ctx context.Context) error {
-	return ctx.Err()
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := c.producer.GetMetadata(nil, false, 1000)
+		errCh <- err
+	}()
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			return fmt.Errorf("check kafka metadata: %w", err)
+		}
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // Close закрывает Kafka producer и дожидается отправки буфера
