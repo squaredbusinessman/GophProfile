@@ -31,18 +31,19 @@ func main() {
 	defer stop()
 
 	logger := app.NewLogger(cfg)
+	ctx = app.ContextWithLogger(ctx, logger)
 	telemetry, err := observability.NewTelemetry(ctx, cfg)
 	if err != nil {
-		logger.Fatal().Err(err).Msg("initialize telemetry")
+		logger.Fatal().Str("error_type", app.ErrorType(err)).Msg("initialize telemetry")
 	}
 	if err := telemetry.StartMetricsServer(cfg.Observability.MetricsAddr); err != nil {
-		logger.Fatal().Err(err).Msg("start metrics server")
+		logger.Fatal().Str("error_type", app.ErrorType(err)).Msg("start metrics server")
 	}
 	defer func() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.HTTP.ShutdownTimeout)
 		defer cancel()
 		if err := telemetry.Shutdown(shutdownCtx); err != nil {
-			logger.Error().Err(err).Msg("shutdown telemetry")
+			logger.Error().Str("error_type", app.ErrorType(err)).Msg("shutdown telemetry")
 		}
 	}()
 	logger.Info().
@@ -54,12 +55,12 @@ func main() {
 
 	defaultAvatar, err := httpapi.LoadDefaultAvatar(cfg.HTTP.DefaultAvatarPath)
 	if err != nil {
-		logger.Fatal().Err(err).Str("path", cfg.HTTP.DefaultAvatarPath).Msg("load default avatar")
+		logger.Fatal().Str("error_type", app.ErrorType(err)).Str("path", cfg.HTTP.DefaultAvatarPath).Msg("load default avatar")
 	}
 
 	db, err := sql.Open("pgx", cfg.Postgres.DSN)
 	if err != nil {
-		logger.Fatal().Err(err).Msg("open postgres connection pool")
+		logger.Fatal().Str("error_type", app.ErrorType(err)).Msg("open postgres connection pool")
 	}
 	defer func() {
 		_ = db.Close()
@@ -67,15 +68,15 @@ func main() {
 
 	s3Client, err := storages3.NewClient(cfg.S3)
 	if err != nil {
-		logger.Fatal().Err(err).Msg("create s3 client")
+		logger.Fatal().Str("error_type", app.ErrorType(err)).Msg("create s3 client")
 	}
 	if err := app.EnsureLocalS3Bucket(ctx, cfg, s3Client); err != nil {
-		logger.Fatal().Err(err).Msg("ensure local s3 bucket")
+		logger.Fatal().Str("error_type", app.ErrorType(err)).Msg("ensure local s3 bucket")
 	}
 
 	kafkaClient, err := queuekafka.NewClient(cfg.Kafka.Brokers, cfg.Kafka.ClientID, cfg.Kafka.ConsumerGroup)
 	if err != nil {
-		logger.Fatal().Err(err).Msg("create kafka client")
+		logger.Fatal().Str("error_type", app.ErrorType(err)).Msg("create kafka client")
 	}
 	defer kafkaClient.Close()
 
@@ -108,7 +109,7 @@ func main() {
 
 	if err := app.RunHTTPServer(ctx, cfg, router, logger); err != nil {
 		if !errors.Is(err, context.Canceled) {
-			logger.Fatal().Err(err).Msg("server stopped with error")
+			logger.Fatal().Str("error_type", app.ErrorType(err)).Msg("server stopped with error")
 		}
 	}
 }

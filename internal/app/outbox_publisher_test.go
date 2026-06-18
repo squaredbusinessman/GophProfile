@@ -1,11 +1,14 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/squaredbusinessman/GophProfile/internal/domain/outbox"
 )
 
@@ -49,10 +52,13 @@ func TestOutboxPublisherKeepsEventPendingWhenPublishFails(t *testing.T) {
 			},
 		},
 	}
-	publisher := &fakeEventPublisher{publishErr: errors.New("kafka down")}
+	const secret = "postgres://secret:password@db:5432/gophprofile"
+	publisher := &fakeEventPublisher{publishErr: errors.New(secret)}
 	service := NewOutboxPublisherService(store, publisher)
+	var logs bytes.Buffer
+	ctx := ContextWithLogger(context.Background(), zerolog.New(&logs))
 
-	published, err := service.PublishPending(context.Background(), 100)
+	published, err := service.PublishPending(ctx, 100)
 	if err != nil {
 		t.Fatalf("PublishPending returned error: %v", err)
 	}
@@ -61,6 +67,9 @@ func TestOutboxPublisherKeepsEventPendingWhenPublishFails(t *testing.T) {
 	}
 	if !store.markFailedAttemptCalled {
 		t.Fatal("MarkOutboxPublishAttemptFailed should be called")
+	}
+	if !strings.Contains(logs.String(), `"level":"warn"`) || strings.Contains(logs.String(), secret) {
+		t.Fatalf("recoverable log имеет неверный уровень или содержит секрет: %s", logs.String())
 	}
 }
 

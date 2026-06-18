@@ -109,6 +109,9 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	startedAt := time.Now()
 	requestID := requestID(req)
 	w.Header().Set("X-Request-ID", requestID)
+	requestCtx := app.ContextWithLogger(req.Context(), r.logger)
+	requestCtx = app.ContextWithRequestID(requestCtx, requestID)
+	req = req.WithContext(requestCtx)
 
 	rec := &statusRecorder{
 		ResponseWriter: w,
@@ -126,15 +129,15 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 
-	event := r.logger.Info()
+	logger := app.LoggerFromContext(req.Context())
+	event := logger.Info()
 	if rec.statusCode >= http.StatusInternalServerError {
-		event = r.logger.Error()
+		event = logger.Error()
 	} else if rec.statusCode >= http.StatusBadRequest {
-		event = r.logger.Warn()
+		event = logger.Warn()
 	}
 
 	event.
-		Str("request_id", requestID).
 		Str("http_method", req.Method).
 		Str("http_path", req.URL.Path).
 		Str("remote_addr", req.RemoteAddr).
@@ -230,6 +233,9 @@ func (r *Router) handlePublicAvatarByEmail(w http.ResponseWriter, req *http.Requ
 			writeDefaultAvatar(w, r.defaultAvatar)
 			return
 		}
+		if isInternalAvatarReadError(err) {
+			r.logInternalError(req.Context(), err, "public avatar read failed")
+		}
 		writeAvatarReadError(w, err)
 		return
 	}
@@ -298,7 +304,9 @@ func (r *Router) handleAvatarUpload(w http.ResponseWriter, req *http.Request) {
 		Reader:      bytes.NewReader(body),
 	})
 	if err != nil {
-		r.logger.Error().Err(err).Msg("avatar upload failed")
+		if !errors.Is(err, app.ErrUserNotFound) {
+			r.logInternalError(req.Context(), err, "avatar upload failed")
+		}
 		writeAvatarUploadError(w, err)
 		return
 	}
@@ -361,6 +369,9 @@ func (r *Router) handleAvatarByID(w http.ResponseWriter, req *http.Request) {
 		return r.avatarReader.GetAvatarByID(ctx, avatarID, size, format)
 	})
 	if err != nil {
+		if isInternalAvatarReadError(err) {
+			r.logInternalError(req.Context(), err, "avatar read failed")
+		}
 		writeAvatarReadError(w, err)
 		return
 	}
@@ -387,6 +398,9 @@ func (r *Router) handleAvatarDeleteByID(w http.ResponseWriter, req *http.Request
 	}
 
 	if err := r.avatarDeleter.DeleteAvatarByID(req.Context(), avatarID, requesterUserID); err != nil {
+		if isInternalAvatarDeleteError(err) {
+			r.logInternalError(req.Context(), err, "avatar delete failed")
+		}
 		writeAvatarDeleteError(w, err)
 		return
 	}
@@ -405,6 +419,9 @@ func (r *Router) handleAvatarMetadata(w http.ResponseWriter, req *http.Request, 
 
 	result, err := r.avatarReader.GetAvatarMetadata(req.Context(), avatarID)
 	if err != nil {
+		if isInternalAvatarReadError(err) {
+			r.logInternalError(req.Context(), err, "avatar metadata read failed")
+		}
 		writeAvatarReadError(w, err)
 		return
 	}
@@ -467,6 +484,9 @@ func (r *Router) handleUsers(w http.ResponseWriter, req *http.Request) {
 			writeDefaultAvatar(w, r.defaultAvatar)
 			return
 		}
+		if isInternalAvatarReadError(err) {
+			r.logInternalError(req.Context(), err, "latest avatar read failed")
+		}
 		writeAvatarReadError(w, err)
 		return
 	}
@@ -493,6 +513,9 @@ func (r *Router) handleLatestAvatarDeleteByUser(w http.ResponseWriter, req *http
 	}
 
 	if err := r.avatarDeleter.DeleteLatestAvatarByUserID(req.Context(), userID, requesterUserID); err != nil {
+		if isInternalAvatarDeleteError(err) {
+			r.logInternalError(req.Context(), err, "latest avatar delete failed")
+		}
 		writeAvatarDeleteError(w, err)
 		return
 	}
@@ -512,6 +535,9 @@ func (r *Router) handleUserAvatarList(w http.ResponseWriter, req *http.Request, 
 	limit, offset := paginationParams(req)
 	result, err := r.avatarReader.ListAvatarsByUserID(req.Context(), userID, limit, offset)
 	if err != nil {
+		if isInternalAvatarReadError(err) {
+			r.logInternalError(req.Context(), err, "avatar list failed")
+		}
 		writeAvatarReadError(w, err)
 		return
 	}
@@ -566,6 +592,7 @@ func (r *Router) handleUserResolve(w http.ResponseWriter, req *http.Request) {
 
 	result, err := r.userResolver.ResolveUserByEmail(req.Context(), email)
 	if err != nil {
+		r.logInternalError(req.Context(), err, "user resolve failed")
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
 			"error": "User resolve failed",
 		})
@@ -579,6 +606,26 @@ func (r *Router) handleUserResolve(w http.ResponseWriter, req *http.Request) {
 		CreatedAt: result.CreatedAt,
 		UpdatedAt: result.UpdatedAt,
 	})
+}
+
+// logInternalError записывает внутреннюю ошибку без потенциально секретного текста
+func (r *Router) logInternalError(ctx context.Context, err error, message string) {
+	app.LoggerFromContext(ctx).Error().
+		Str("error_type", app.ErrorType(err)).
+		Msg(message)
+}
+
+// isInternalAvatarReadError отличает внутреннюю ошибку чтения от ожидаемой клиентской ошибки
+func isInternalAvatarReadError(err error) bool {
+	return !errors.Is(err, app.ErrAvatarNotFound) &&
+		!errors.Is(err, app.ErrAvatarProcessing) &&
+		!errors.Is(err, app.ErrUnsupportedAvatarSize) &&
+		!errors.Is(err, app.ErrUnsupportedAvatarFormat)
+}
+
+// isInternalAvatarDeleteError отличает внутреннюю ошибку удаления от ожидаемой клиентской ошибки
+func isInternalAvatarDeleteError(err error) bool {
+	return !errors.Is(err, app.ErrAvatarNotFound) && !errors.Is(err, app.ErrAvatarForbidden)
 }
 
 type HealthResponse struct {

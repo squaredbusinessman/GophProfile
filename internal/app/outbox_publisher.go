@@ -43,6 +43,11 @@ func (s *OutboxPublisherService) PublishPending(ctx context.Context, limit int) 
 	published := 0
 	for _, event := range events {
 		if err := s.publisher.Publish(ctx, event.Topic, event.Key, event.Payload); err != nil {
+			LoggerFromContext(ctx).Warn().
+				Str("event_id", event.ID).
+				Str("topic", event.Topic).
+				Str("error_type", ErrorType(err)).
+				Msg("outbox event publish failed")
 			_ = s.store.MarkOutboxPublishAttemptFailed(ctx, event.ID, err, s.now().UTC())
 			continue
 		}

@@ -61,8 +61,8 @@ func TestLoadUsesLocalDefaults(t *testing.T) {
 	if cfg.Observability.ServiceName != "gophprofile" || cfg.Observability.MetricsAddr != ":9090" {
 		t.Fatalf("Observability defaults = %q/%q, want gophprofile/:9090", cfg.Observability.ServiceName, cfg.Observability.MetricsAddr)
 	}
-	if cfg.Observability.LogLevel != "debug" || cfg.Observability.LogFormat != "console" {
-		t.Fatalf("logging defaults = %q/%q, want debug/console", cfg.Observability.LogLevel, cfg.Observability.LogFormat)
+	if cfg.Observability.LogLevel != "info" || cfg.Observability.LogFormat != "json" {
+		t.Fatalf("logging defaults = %q/%q, want info/json", cfg.Observability.LogLevel, cfg.Observability.LogFormat)
 	}
 }
 

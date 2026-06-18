@@ -12,7 +12,8 @@ import (
 
 // RunWorker запускает worker и периодически публикует pending outbox события
 func RunWorker(ctx context.Context, cfg config.Config, logger zerolog.Logger, outboxPublisher *OutboxPublisherService, processConsumer ProcessMessageConsumer, avatarProcessor *AvatarProcessService, avatarDeleter *AvatarDeleteWorkerService) error {
-	logger.Info().
+	ctx = ContextWithLogger(ctx, logger)
+	LoggerFromContext(ctx).Info().
 		Strs("kafka_brokers", cfg.Kafka.Brokers).
 		Str("consumer_group", cfg.Kafka.ConsumerGroup).
 		Msg("worker started")
@@ -29,16 +30,16 @@ func RunWorker(ctx context.Context, cfg config.Config, logger zerolog.Logger, ou
 	ticker := time.NewTicker(cfg.Worker.OutboxPollInterval)
 	defer ticker.Stop()
 
-	publishPendingOutbox(ctx, cfg, logger, outboxPublisher)
+	publishPendingOutbox(ctx, cfg, outboxPublisher)
 
 	for {
 		select {
 		case err := <-consumerErrCh:
 			return err
 		case <-ctx.Done():
-			return shutdownWorker(ctx, cfg, logger, consumerErrCh)
+			return shutdownWorker(ctx, cfg, consumerErrCh)
 		case <-ticker.C:
-			publishPendingOutbox(ctx, cfg, logger, outboxPublisher)
+			publishPendingOutbox(ctx, cfg, outboxPublisher)
 		}
 	}
 }
@@ -70,8 +71,8 @@ func consumeAvatarMessages(ctx context.Context, consumer ProcessMessageConsumer,
 }
 
 // shutdownWorker выполняет graceful shutdown worker
-func shutdownWorker(ctx context.Context, cfg config.Config, logger zerolog.Logger, consumerErrCh <-chan error) error {
-	logger.Info().Dur("timeout", cfg.Worker.ShutdownTimeout).Msg("worker shutting down")
+func shutdownWorker(ctx context.Context, cfg config.Config, consumerErrCh <-chan error) error {
+	LoggerFromContext(ctx).Info().Dur("timeout", cfg.Worker.ShutdownTimeout).Msg("worker shutting down")
 
 	if consumerErrCh == nil {
 		return ctx.Err()
@@ -89,17 +90,19 @@ func shutdownWorker(ctx context.Context, cfg config.Config, logger zerolog.Logge
 }
 
 // publishPendingOutbox публикует pending outbox события если publisher настроен
-func publishPendingOutbox(ctx context.Context, cfg config.Config, logger zerolog.Logger, outboxPublisher *OutboxPublisherService) {
+func publishPendingOutbox(ctx context.Context, cfg config.Config, outboxPublisher *OutboxPublisherService) {
 	if outboxPublisher == nil {
 		return
 	}
 
 	published, err := outboxPublisher.PublishPending(ctx, cfg.Worker.OutboxBatchSize)
 	if err != nil {
-		logger.Error().Err(err).Msg("outbox publish failed")
+		LoggerFromContext(ctx).Error().
+			Str("error_type", ErrorType(err)).
+			Msg("outbox publish failed")
 		return
 	}
 	if published > 0 {
-		logger.Info().Int("published", published).Msg("outbox events published")
+		LoggerFromContext(ctx).Info().Int("published", published).Msg("outbox events published")
 	}
 }

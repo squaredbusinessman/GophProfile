@@ -146,8 +146,8 @@ docker compose -f deploy/vault/docker-compose.yml up -d
 - `OTEL_TRACES_SAMPLER` (по умолчанию `parentbased_always_on`)
 - `OTEL_TRACES_SAMPLER_ARG` (по умолчанию `1`)
 - `METRICS_ADDR` (`:9090` для server, `:9091` для worker)
-- `LOG_LEVEL` (по умолчанию `debug`)
-- `LOG_FORMAT` (`console` или `json`)
+- `LOG_LEVEL` (по умолчанию `info`, некорректное значение также даёт `info`)
+- `LOG_FORMAT` (по умолчанию `json`; `console` разрешён только при `APP_ENV=local`)
 
 Metrics HTTP server запускается и корректно останавливается даже в no-op режиме.
 Для отправки spans в локальном compose добавьте OTLP collector и установите

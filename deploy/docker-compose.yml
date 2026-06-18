@@ -112,6 +112,8 @@ services:
         condition: service_started
     environment:
       APP_ENV: local
+      LOG_LEVEL: info
+      LOG_FORMAT: json
       OTEL_ENABLED: "false"
       OTEL_SERVICE_NAME: gophprofile-server
       OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
@@ -150,6 +152,8 @@ services:
         condition: service_started
     environment:
       APP_ENV: local
+      LOG_LEVEL: info
+      LOG_FORMAT: json
       OTEL_ENABLED: "false"
       OTEL_SERVICE_NAME: gophprofile-worker
       OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317

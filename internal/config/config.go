@@ -207,8 +207,8 @@ func load(process string) Config {
 			TracesSampler:    envString("OTEL_TRACES_SAMPLER", "parentbased_always_on"),
 			TracesSamplerArg: envFloat("OTEL_TRACES_SAMPLER_ARG", 1),
 			MetricsAddr:      envString("METRICS_ADDR", metricsAddr),
-			LogLevel:         envString("LOG_LEVEL", "debug"),
-			LogFormat:        envString("LOG_FORMAT", "console"),
+			LogLevel:         envString("LOG_LEVEL", "info"),
+			LogFormat:        envString("LOG_FORMAT", "json"),
 		},
 		HTTP: HTTPConfig{
 			Addr:               envString("HTTP_ADDR", defaultHTTPAddr),
