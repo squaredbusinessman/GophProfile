@@ -11,6 +11,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/squaredbusinessman/GophProfile/internal/app"
+	"github.com/squaredbusinessman/GophProfile/internal/observability"
 	queuekafka "github.com/squaredbusinessman/GophProfile/internal/queue/kafka"
 	"github.com/squaredbusinessman/GophProfile/internal/storage/postgres"
 	storages3 "github.com/squaredbusinessman/GophProfile/internal/storage/s3"
@@ -20,7 +21,7 @@ import (
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 
-	cfg, err := app.LoadConfig(ctx)
+	cfg, err := app.LoadConfigForProcess(ctx, "worker")
 	if err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "load config: %v\n", err)
 		stop()
@@ -29,6 +30,25 @@ func main() {
 	defer stop()
 
 	logger := app.NewLogger(cfg)
+	telemetry, err := observability.NewTelemetry(ctx, cfg)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("initialize telemetry")
+	}
+	if err := telemetry.StartMetricsServer(cfg.Observability.MetricsAddr); err != nil {
+		logger.Fatal().Err(err).Msg("start metrics server")
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.Worker.ShutdownTimeout)
+		defer cancel()
+		if err := telemetry.Shutdown(shutdownCtx); err != nil {
+			logger.Error().Err(err).Msg("shutdown telemetry")
+		}
+	}()
+	logger.Info().
+		Bool("otel_enabled", cfg.Observability.Enabled).
+		Str("otel_service", cfg.Observability.ServiceName).
+		Str("metrics_addr", cfg.Observability.MetricsAddr).
+		Msg("telemetry initialized")
 
 	db, err := sql.Open("pgx", cfg.Postgres.DSN)
 	if err != nil {

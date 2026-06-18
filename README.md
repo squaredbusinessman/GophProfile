@@ -124,6 +124,8 @@ docker compose -f deploy/vault/docker-compose.yml up -d
 Сервисы:
 
 - server API: `http://localhost:8080`
+- server metrics: `http://localhost:9090/metrics`
+- worker metrics: `http://localhost:9091/metrics`
 - frontend-build: `http://localhost:3000/web/`
 - PostgreSQL: `localhost:5432`
 - Kafka: `kafka:9092` внутри compose-сети
@@ -132,6 +134,24 @@ docker compose -f deploy/vault/docker-compose.yml up -d
 
 В локальном compose `server` и `worker` автоматически создают MinIO bucket из
 `S3_BUCKET`, если он еще отсутствует.
+
+## Observability
+
+Оба процесса используют единый OpenTelemetry bootstrap. Конфигурация:
+
+- `OTEL_ENABLED` (по умолчанию `false`)
+- `OTEL_SERVICE_NAME` (`gophprofile-server` или `gophprofile-worker`)
+- `OTEL_EXPORTER_OTLP_ENDPOINT` (по умолчанию `localhost:4317`)
+- `OTEL_EXPORTER_OTLP_INSECURE` (по умолчанию `true`)
+- `OTEL_TRACES_SAMPLER` (по умолчанию `parentbased_always_on`)
+- `OTEL_TRACES_SAMPLER_ARG` (по умолчанию `1`)
+- `METRICS_ADDR` (`:9090` для server, `:9091` для worker)
+- `LOG_LEVEL` (по умолчанию `debug`)
+- `LOG_FORMAT` (`console` или `json`)
+
+Metrics HTTP server запускается и корректно останавливается даже в no-op режиме.
+Для отправки spans в локальном compose добавьте OTLP collector и установите
+`OTEL_ENABLED=true`.
 
 Для повторного запуска без пересборки образов:
 

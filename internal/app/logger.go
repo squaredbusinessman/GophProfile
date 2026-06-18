@@ -12,7 +12,7 @@ import (
 
 // NewLogger создает Zerolog logger с едиными полями сервиса и окружения
 func NewLogger(cfg config.Config) zerolog.Logger {
-	level, err := zerolog.ParseLevel(strings.ToLower(cfg.LogLevel))
+	level, err := zerolog.ParseLevel(strings.ToLower(cfg.Observability.LogLevel))
 	if err != nil {
 		level = zerolog.DebugLevel
 	}
@@ -26,7 +26,7 @@ func NewLogger(cfg config.Config) zerolog.Logger {
 	zerolog.CallerFieldName = "caller"
 
 	output := zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.RFC3339}
-	if cfg.Env == "prod" || cfg.Env == "production" {
+	if strings.EqualFold(cfg.Observability.LogFormat, "json") {
 		logger := zerolog.New(os.Stdout).Hook(severityHook{})
 		log.Logger = logger
 		return logger.With().
@@ -49,6 +49,7 @@ func NewLogger(cfg config.Config) zerolog.Logger {
 		Logger()
 }
 
+// severityHook добавляет уровень события в формате внешних систем логирования
 type severityHook struct{}
 
 // Run добавляет поле severity к каждому событию Zerolog
