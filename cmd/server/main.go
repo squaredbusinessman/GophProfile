@@ -62,6 +62,9 @@ func main() {
 	if err != nil {
 		logger.Fatal().Str("error_type", app.ErrorType(err)).Msg("open postgres connection pool")
 	}
+	if err := telemetry.RegisterDBPool(db, "postgres"); err != nil {
+		logger.Fatal().Str("error_type", app.ErrorType(err)).Msg("register postgres pool metrics")
+	}
 	defer func() {
 		_ = db.Close()
 	}()

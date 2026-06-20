@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/squaredbusinessman/GophProfile/internal/config"
 	"go.opentelemetry.io/otel/attribute"
 	otelmetric "go.opentelemetry.io/otel/metric"
@@ -82,6 +83,45 @@ func TestMetricsHandlerServesPrometheusFormat(t *testing.T) {
 	}
 	if !strings.Contains(recorder.Header().Get("Content-Type"), "text/plain") || !strings.Contains(recorder.Body.String(), "stage_one_requests_total") {
 		t.Fatalf("unexpected Prometheus response: content-type=%q body=%q", recorder.Header().Get("Content-Type"), recorder.Body.String())
+	}
+}
+
+// TestDBPoolMetricsAppearInPrometheus проверяет экспорт состояния database/sql pool
+func TestDBPoolMetricsAppearInPrometheus(t *testing.T) {
+	cfg := testConfig(true)
+	telemetry, err := NewTelemetry(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("NewTelemetry() error = %v", err)
+	}
+	t.Cleanup(func() { _ = telemetry.Shutdown(context.Background()) })
+
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	db.SetMaxOpenConns(7)
+	if err := telemetry.RegisterDBPool(db, "postgres"); err != nil {
+		t.Fatalf("RegisterDBPool() error = %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	telemetry.MetricsHandler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	body := recorder.Body.String()
+	for _, metricName := range []string{
+		"db_client_connection_count",
+		"db_client_connection_max",
+		"db_client_connection_wait_count",
+		"db_client_connection_wait_duration_seconds",
+	} {
+		if !strings.Contains(body, metricName) {
+			t.Errorf("metrics body does not contain %q", metricName)
+		}
+	}
+	if !strings.Contains(body, `db_client_connection_pool_name="postgres"`) ||
+		!strings.Contains(body, `db_client_connection_state="idle"`) ||
+		!strings.Contains(body, `db_client_connection_state="used"`) {
+		t.Fatalf("metrics body does not contain pool labels: %s", body)
 	}
 }
 

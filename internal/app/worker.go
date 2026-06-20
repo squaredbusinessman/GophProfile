@@ -8,7 +8,12 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/squaredbusinessman/GophProfile/internal/config"
 	queuekafka "github.com/squaredbusinessman/GophProfile/internal/queue/kafka"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
 )
+
+// workerInstrumentationName задаёт имя области инструментирования worker operations
+const workerInstrumentationName = "github.com/squaredbusinessman/GophProfile/internal/app/worker"
 
 // RunWorker запускает worker и периодически публикует pending outbox события
 func RunWorker(ctx context.Context, cfg config.Config, logger zerolog.Logger, outboxPublisher *OutboxPublisherService, processConsumer ProcessMessageConsumer, avatarProcessor *AvatarProcessService, avatarDeleter *AvatarDeleteWorkerService) error {
@@ -63,10 +68,23 @@ func consumeAvatarMessages(ctx context.Context, consumer ProcessMessageConsumer,
 		topics = append(topics, queuekafka.TopicAvatarDelete)
 	}
 	return consumer.Consume(ctx, topics, func(ctx context.Context, message queuekafka.Message) error {
+		operation := "worker.avatar.process"
 		if message.Topic == queuekafka.TopicAvatarDelete {
-			return deleter.HandleDeleteMessage(ctx, message.Value)
+			operation = "worker.avatar.delete"
 		}
-		return processor.HandleProcessMessage(ctx, message.Value)
+		ctx, span := otel.Tracer(workerInstrumentationName).Start(ctx, operation)
+		defer span.End()
+
+		var err error
+		if message.Topic == queuekafka.TopicAvatarDelete {
+			err = deleter.HandleDeleteMessage(ctx, message.Value)
+		} else {
+			err = processor.HandleProcessMessage(ctx, message.Value)
+		}
+		if err != nil {
+			span.SetStatus(codes.Error, "worker operation failed")
+		}
+		return err
 	})
 }
 
@@ -94,9 +112,12 @@ func publishPendingOutbox(ctx context.Context, cfg config.Config, outboxPublishe
 	if outboxPublisher == nil {
 		return
 	}
+	ctx, span := otel.Tracer(workerInstrumentationName).Start(ctx, "worker.outbox.publish")
+	defer span.End()
 
 	published, err := outboxPublisher.PublishPending(ctx, cfg.Worker.OutboxBatchSize)
 	if err != nil {
+		span.SetStatus(codes.Error, "worker operation failed")
 		LoggerFromContext(ctx).Error().
 			Str("error_type", ErrorType(err)).
 			Msg("outbox publish failed")

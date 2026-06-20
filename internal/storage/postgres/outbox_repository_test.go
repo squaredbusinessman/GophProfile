@@ -14,6 +14,7 @@ import (
 
 // TestCreateAvatarWithOutboxWritesBothRecordsInTransaction проверяет атомарную запись avatar и outbox
 func TestCreateAvatarWithOutboxWritesBothRecordsInTransaction(t *testing.T) {
+	recorder := installPostgresSpanRecorder(t)
 	db, mock := newMockDB(t)
 	repo := NewOutboxRepository(db)
 	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
@@ -81,6 +82,39 @@ func TestCreateAvatarWithOutboxWritesBothRecordsInTransaction(t *testing.T) {
 	}
 
 	assertExpectations(t, mock)
+	spans := recorder.Ended()
+	if len(spans) != 1 {
+		t.Fatalf("ended spans = %d, want 1", len(spans))
+	}
+	names := eventNames(spans[0].Events())
+	if !names["db.transaction.begin"] || !names["db.transaction.commit"] || names["db.transaction.rollback"] {
+		t.Fatalf("unexpected transaction events: %v", names)
+	}
+}
+
+// TestCreateAvatarWithOutboxRecordsRollback проверяет событие rollback при отмене транзакции
+func TestCreateAvatarWithOutboxRecordsRollback(t *testing.T) {
+	recorder := installPostgresSpanRecorder(t)
+	db, mock := newMockDB(t)
+	repo := NewOutboxRepository(db)
+
+	mock.ExpectBegin()
+	mock.ExpectRollback()
+
+	err := repo.CreateAvatarWithOutbox(context.Background(), avatar.Avatar{Status: avatar.Status("invalid")}, outbox.Event{})
+	if err == nil {
+		t.Fatal("CreateAvatarWithOutbox() error = nil")
+	}
+	assertExpectations(t, mock)
+
+	spans := recorder.Ended()
+	if len(spans) != 1 {
+		t.Fatalf("ended spans = %d, want 1", len(spans))
+	}
+	names := eventNames(spans[0].Events())
+	if !names["db.transaction.begin"] || !names["db.transaction.rollback"] || names["db.transaction.commit"] {
+		t.Fatalf("unexpected transaction events: %v", names)
+	}
 }
 
 // TestSoftDeleteAvatarWithOutboxWritesBothRecordsInTransaction проверяет атомарный soft delete и outbox

@@ -13,6 +13,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/squaredbusinessman/GophProfile/internal/domain/avatar"
 	"github.com/squaredbusinessman/GophProfile/internal/domain/user"
+	"go.opentelemetry.io/otel"
 )
 
 // TestIntegrationAvatarRepositorySoftDeleteFiltersActiveReads проверяет repository на реальном PostgreSQL
@@ -128,6 +129,40 @@ func TestIntegrationUserRepositoryFindOrCreateKeepsStableID(t *testing.T) {
 	if found.ID != first.ID {
 		t.Fatalf("found user id = %q, want %q", found.ID, first.ID)
 	}
+}
+
+// TestIntegrationPostgresQueryCreatesChildSpan проверяет trace настоящего PostgreSQL query
+func TestIntegrationPostgresQueryCreatesChildSpan(t *testing.T) {
+	recorder := installPostgresSpanRecorder(t)
+	db := openIntegrationDB(t)
+	cleanupIntegrationTables(t, db)
+	t.Cleanup(func() {
+		cleanupIntegrationTables(t, db)
+	})
+
+	ctx, parent := otel.Tracer("integration-test").Start(context.Background(), "upload")
+	parentSpanID := parent.SpanContext().SpanID()
+	repo := NewUserRepository(db)
+	err := repo.CreateUser(ctx, user.User{
+		ID:        "0c543858-df6a-4596-a3c5-0c8f2d74f153",
+		Email:     "trace@example.com",
+		CreatedAt: time.Date(2026, 6, 20, 10, 0, 0, 0, time.UTC),
+		UpdatedAt: time.Date(2026, 6, 20, 10, 0, 0, 0, time.UTC),
+	})
+	parent.End()
+	if err != nil {
+		t.Fatalf("CreateUser returned error: %v", err)
+	}
+
+	for _, span := range recorder.Ended() {
+		if span.Name() == "INSERT users" {
+			if span.Parent().SpanID() != parentSpanID {
+				t.Fatalf("database parent span = %s, want %s", span.Parent().SpanID(), parentSpanID)
+			}
+			return
+		}
+	}
+	t.Fatal("INSERT users span was not recorded")
 }
 
 // openIntegrationDB открывает подключение к PostgreSQL для integration suite

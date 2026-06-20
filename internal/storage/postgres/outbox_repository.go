@@ -21,13 +21,21 @@ func NewOutboxRepository(db *sql.DB) *OutboxRepository {
 }
 
 // CreateAvatarWithOutbox атомарно сохраняет avatar и outbox событие
-func (r *OutboxRepository) CreateAvatarWithOutbox(ctx context.Context, item avatar.Avatar, event outbox.Event) error {
+func (r *OutboxRepository) CreateAvatarWithOutbox(ctx context.Context, item avatar.Avatar, event outbox.Event) (err error) {
+	ctx, span := startRepositorySpan(ctx, "TRANSACTION", "")
+	defer func() { finishRepositorySpan(span, err) }()
+
 	tx, err := r.db.BeginTx(ctx, nil)
+	addTransactionEvent(span, "db.transaction.begin", err)
 	if err != nil {
 		return fmt.Errorf("begin avatar outbox transaction: %w", err)
 	}
+	committed := false
 	defer func() {
-		_ = tx.Rollback()
+		rollbackErr := tx.Rollback()
+		if !committed {
+			addTransactionEvent(span, "db.transaction.rollback", rollbackErr)
+		}
 	}()
 
 	if err := insertAvatar(ctx, tx, item); err != nil {
@@ -36,21 +44,32 @@ func (r *OutboxRepository) CreateAvatarWithOutbox(ctx context.Context, item avat
 	if err := insertOutboxEvent(ctx, tx, event); err != nil {
 		return err
 	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit avatar outbox transaction: %w", err)
+	commitErr := tx.Commit()
+	addTransactionEvent(span, "db.transaction.commit", commitErr)
+	if commitErr != nil {
+		return fmt.Errorf("commit avatar outbox transaction: %w", commitErr)
 	}
+	committed = true
 
 	return nil
 }
 
 // SoftDeleteAvatarWithOutbox атомарно помечает avatar удаляемой и сохраняет outbox событие
-func (r *OutboxRepository) SoftDeleteAvatarWithOutbox(ctx context.Context, id string, userID string, deletedAt time.Time, event outbox.Event) error {
+func (r *OutboxRepository) SoftDeleteAvatarWithOutbox(ctx context.Context, id string, userID string, deletedAt time.Time, event outbox.Event) (err error) {
+	ctx, span := startRepositorySpan(ctx, "TRANSACTION", "")
+	defer func() { finishRepositorySpan(span, err) }()
+
 	tx, err := r.db.BeginTx(ctx, nil)
+	addTransactionEvent(span, "db.transaction.begin", err)
 	if err != nil {
 		return fmt.Errorf("begin avatar delete outbox transaction: %w", err)
 	}
+	committed := false
 	defer func() {
-		_ = tx.Rollback()
+		rollbackErr := tx.Rollback()
+		if !committed {
+			addTransactionEvent(span, "db.transaction.rollback", rollbackErr)
+		}
 	}()
 
 	result, err := tx.ExecContext(ctx, `
@@ -71,15 +90,21 @@ func (r *OutboxRepository) SoftDeleteAvatarWithOutbox(ctx context.Context, id st
 	if err := insertOutboxEvent(ctx, tx, event); err != nil {
 		return err
 	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit avatar delete outbox transaction: %w", err)
+	commitErr := tx.Commit()
+	addTransactionEvent(span, "db.transaction.commit", commitErr)
+	if commitErr != nil {
+		return fmt.Errorf("commit avatar delete outbox transaction: %w", commitErr)
 	}
+	committed = true
 
 	return nil
 }
 
 // MarkOutboxPublished отмечает outbox событие опубликованным
-func (r *OutboxRepository) MarkOutboxPublished(ctx context.Context, id string, publishedAt time.Time) error {
+func (r *OutboxRepository) MarkOutboxPublished(ctx context.Context, id string, publishedAt time.Time) (err error) {
+	ctx, span := startRepositorySpan(ctx, "UPDATE", "outbox_events")
+	defer func() { finishRepositorySpan(span, err) }()
+
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE outbox_events
 		SET status = $2,
@@ -96,7 +121,10 @@ func (r *OutboxRepository) MarkOutboxPublished(ctx context.Context, id string, p
 }
 
 // MarkOutboxPublishAttemptFailed сохраняет ошибку публикации и оставляет событие pending
-func (r *OutboxRepository) MarkOutboxPublishAttemptFailed(ctx context.Context, id string, publishErr error, updatedAt time.Time) error {
+func (r *OutboxRepository) MarkOutboxPublishAttemptFailed(ctx context.Context, id string, publishErr error, updatedAt time.Time) (err error) {
+	ctx, span := startRepositorySpan(ctx, "UPDATE", "outbox_events")
+	defer func() { finishRepositorySpan(span, err) }()
+
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE outbox_events
 		SET attempts = attempts + 1,
@@ -113,7 +141,10 @@ func (r *OutboxRepository) MarkOutboxPublishAttemptFailed(ctx context.Context, i
 }
 
 // ListPendingOutboxEvents возвращает pending outbox события для retry publisher
-func (r *OutboxRepository) ListPendingOutboxEvents(ctx context.Context, limit int) ([]outbox.Event, error) {
+func (r *OutboxRepository) ListPendingOutboxEvents(ctx context.Context, limit int) (events []outbox.Event, err error) {
+	ctx, span := startRepositorySpan(ctx, "SELECT", "outbox_events")
+	defer func() { finishRepositorySpan(span, err) }()
+
 	if limit <= 0 {
 		limit = 100
 	}
@@ -142,7 +173,7 @@ func (r *OutboxRepository) ListPendingOutboxEvents(ctx context.Context, limit in
 		_ = rows.Close()
 	}()
 
-	events := make([]outbox.Event, 0)
+	events = make([]outbox.Event, 0)
 	for rows.Next() {
 		event, err := scanOutboxEvent(rows)
 		if err != nil {

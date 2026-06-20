@@ -18,6 +18,7 @@ import (
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	otelprom "go.opentelemetry.io/otel/exporters/prometheus"
+	otelmetric "go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -42,6 +43,8 @@ type Telemetry struct {
 	metricsServer *http.Server
 	// metricsDone принимает результат завершения сервера метрик
 	metricsDone chan error
+	// metricRegistrations содержат callback-регистрации runtime metrics
+	metricRegistrations []otelmetric.Registration
 }
 
 // NewTelemetry создаёт и регистрирует провайдеры телеметрии
@@ -169,9 +172,15 @@ func (t *Telemetry) Shutdown(ctx context.Context) error {
 	t.mu.Lock()
 	server := t.metricsServer
 	done := t.metricsDone
+	registrations := append([]otelmetric.Registration(nil), t.metricRegistrations...)
 	t.mu.Unlock()
 
 	var errs []error
+	for _, registration := range registrations {
+		if err := registration.Unregister(); err != nil {
+			errs = append(errs, fmt.Errorf("unregister metric callback: %w", err))
+		}
+	}
 	if server != nil {
 		if err := server.Shutdown(ctx); err != nil {
 			errs = append(errs, fmt.Errorf("shutdown metrics server: %w", err))

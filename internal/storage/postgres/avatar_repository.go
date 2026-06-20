@@ -24,7 +24,9 @@ func NewAvatarRepository(db *sql.DB) *AvatarRepository {
 }
 
 // CreateAvatar сохраняет новую avatar со статусом processing
-func (r *AvatarRepository) CreateAvatar(ctx context.Context, item avatar.Avatar) error {
+func (r *AvatarRepository) CreateAvatar(ctx context.Context, item avatar.Avatar) (err error) {
+	ctx, span := startRepositorySpan(ctx, "INSERT", "avatars")
+	defer func() { finishRepositorySpan(span, err) }()
 	return insertAvatar(ctx, r.db, item)
 }
 
@@ -76,7 +78,10 @@ func insertAvatar(ctx context.Context, executor sqlExecutor, item avatar.Avatar)
 }
 
 // GetAvatar возвращает активную avatar по id
-func (r *AvatarRepository) GetAvatar(ctx context.Context, id string) (avatar.Avatar, error) {
+func (r *AvatarRepository) GetAvatar(ctx context.Context, id string) (item avatar.Avatar, err error) {
+	ctx, span := startRepositorySpan(ctx, "SELECT", "avatars")
+	defer func() { finishRepositorySpan(span, err) }()
+
 	row := r.db.QueryRowContext(ctx, `
 		SELECT
 			id,
@@ -98,7 +103,7 @@ func (r *AvatarRepository) GetAvatar(ctx context.Context, id string) (avatar.Ava
 			AND deleted_at IS NULL
 	`, id)
 
-	item, err := scanAvatar(row)
+	item, err = scanAvatar(row)
 	if err != nil {
 		return avatar.Avatar{}, err
 	}
@@ -107,7 +112,10 @@ func (r *AvatarRepository) GetAvatar(ctx context.Context, id string) (avatar.Ava
 }
 
 // GetAvatarIncludingDeleted возвращает avatar по id включая мягко удаленные записи
-func (r *AvatarRepository) GetAvatarIncludingDeleted(ctx context.Context, id string) (avatar.Avatar, error) {
+func (r *AvatarRepository) GetAvatarIncludingDeleted(ctx context.Context, id string) (item avatar.Avatar, err error) {
+	ctx, span := startRepositorySpan(ctx, "SELECT", "avatars")
+	defer func() { finishRepositorySpan(span, err) }()
+
 	row := r.db.QueryRowContext(ctx, `
 		SELECT
 			id,
@@ -128,7 +136,7 @@ func (r *AvatarRepository) GetAvatarIncludingDeleted(ctx context.Context, id str
 		WHERE id = $1
 	`, id)
 
-	item, err := scanAvatar(row)
+	item, err = scanAvatar(row)
 	if err != nil {
 		return avatar.Avatar{}, err
 	}
@@ -137,7 +145,10 @@ func (r *AvatarRepository) GetAvatarIncludingDeleted(ctx context.Context, id str
 }
 
 // ListAvatarsByUser возвращает активные avatar пользователя по внутреннему UUID
-func (r *AvatarRepository) ListAvatarsByUser(ctx context.Context, userID string, limit int, offset int) ([]avatar.Avatar, error) {
+func (r *AvatarRepository) ListAvatarsByUser(ctx context.Context, userID string, limit int, offset int) (items []avatar.Avatar, err error) {
+	ctx, span := startRepositorySpan(ctx, "SELECT", "avatars")
+	defer func() { finishRepositorySpan(span, err) }()
+
 	if limit <= 0 {
 		limit = 50
 	}
@@ -174,7 +185,7 @@ func (r *AvatarRepository) ListAvatarsByUser(ctx context.Context, userID string,
 		_ = rows.Close()
 	}()
 
-	items := make([]avatar.Avatar, 0)
+	items = make([]avatar.Avatar, 0)
 	for rows.Next() {
 		item, err := scanAvatar(rows)
 		if err != nil {
@@ -190,10 +201,12 @@ func (r *AvatarRepository) ListAvatarsByUser(ctx context.Context, userID string,
 }
 
 // UpdateAvatarStatus обновляет статус активной avatar
-func (r *AvatarRepository) UpdateAvatarStatus(ctx context.Context, id string, status avatar.Status, updatedAt time.Time) error {
+func (r *AvatarRepository) UpdateAvatarStatus(ctx context.Context, id string, status avatar.Status, updatedAt time.Time) (err error) {
 	if err := avatar.ValidateStatus(status); err != nil {
 		return err
 	}
+	ctx, span := startRepositorySpan(ctx, "UPDATE", "avatars")
+	defer func() { finishRepositorySpan(span, err) }()
 
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE avatars
@@ -210,7 +223,10 @@ func (r *AvatarRepository) UpdateAvatarStatus(ctx context.Context, id string, st
 }
 
 // MarkAvatarReady сохраняет размеры и ключи миниатюр после обработки
-func (r *AvatarRepository) MarkAvatarReady(ctx context.Context, id string, width int, height int, thumb100Key string, thumb300Key string, updatedAt time.Time) error {
+func (r *AvatarRepository) MarkAvatarReady(ctx context.Context, id string, width int, height int, thumb100Key string, thumb300Key string, updatedAt time.Time) (err error) {
+	ctx, span := startRepositorySpan(ctx, "UPDATE", "avatars")
+	defer func() { finishRepositorySpan(span, err) }()
+
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE avatars
 		SET status = $2,
@@ -230,7 +246,10 @@ func (r *AvatarRepository) MarkAvatarReady(ctx context.Context, id string, width
 }
 
 // SoftDeleteAvatar выполняет мягкое удаление avatar пользователя по внутреннему UUID
-func (r *AvatarRepository) SoftDeleteAvatar(ctx context.Context, id string, userID string, deletedAt time.Time) error {
+func (r *AvatarRepository) SoftDeleteAvatar(ctx context.Context, id string, userID string, deletedAt time.Time) (err error) {
+	ctx, span := startRepositorySpan(ctx, "UPDATE", "avatars")
+	defer func() { finishRepositorySpan(span, err) }()
+
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE avatars
 		SET status = $3,
@@ -248,7 +267,10 @@ func (r *AvatarRepository) SoftDeleteAvatar(ctx context.Context, id string, user
 }
 
 // MarkAvatarDeleted переводит avatar в состояние удаленных S3 objects
-func (r *AvatarRepository) MarkAvatarDeleted(ctx context.Context, id string, updatedAt time.Time) error {
+func (r *AvatarRepository) MarkAvatarDeleted(ctx context.Context, id string, updatedAt time.Time) (err error) {
+	ctx, span := startRepositorySpan(ctx, "UPDATE", "avatars")
+	defer func() { finishRepositorySpan(span, err) }()
+
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE avatars
 		SET status = $2,

@@ -21,8 +21,11 @@ func NewUserRepository(db *sql.DB) *UserRepository {
 }
 
 // CreateUser сохраняет нового пользователя
-func (r *UserRepository) CreateUser(ctx context.Context, item user.User) error {
-	_, err := r.db.ExecContext(ctx, `
+func (r *UserRepository) CreateUser(ctx context.Context, item user.User) (err error) {
+	ctx, span := startRepositorySpan(ctx, "INSERT", "users")
+	defer func() { finishRepositorySpan(span, err) }()
+
+	_, err = r.db.ExecContext(ctx, `
 		INSERT INTO users (
 			id,
 			email,
@@ -46,7 +49,10 @@ func (r *UserRepository) CreateUser(ctx context.Context, item user.User) error {
 }
 
 // GetUser возвращает активного пользователя по внутреннему UUID
-func (r *UserRepository) GetUser(ctx context.Context, id string) (user.User, error) {
+func (r *UserRepository) GetUser(ctx context.Context, id string) (item user.User, err error) {
+	ctx, span := startRepositorySpan(ctx, "SELECT", "users")
+	defer func() { finishRepositorySpan(span, err) }()
+
 	row := r.db.QueryRowContext(ctx, `
 		SELECT
 			id,
@@ -63,7 +69,10 @@ func (r *UserRepository) GetUser(ctx context.Context, id string) (user.User, err
 }
 
 // GetUserByEmail возвращает активного пользователя по нормализованному email
-func (r *UserRepository) GetUserByEmail(ctx context.Context, email string) (user.User, error) {
+func (r *UserRepository) GetUserByEmail(ctx context.Context, email string) (item user.User, err error) {
+	ctx, span := startRepositorySpan(ctx, "SELECT", "users")
+	defer func() { finishRepositorySpan(span, err) }()
+
 	row := r.db.QueryRowContext(ctx, `
 		SELECT
 			id,
@@ -80,7 +89,10 @@ func (r *UserRepository) GetUserByEmail(ctx context.Context, email string) (user
 }
 
 // FindOrCreateUserByEmail возвращает пользователя по email или создает нового
-func (r *UserRepository) FindOrCreateUserByEmail(ctx context.Context, email string, now time.Time) (user.User, error) {
+func (r *UserRepository) FindOrCreateUserByEmail(ctx context.Context, email string, now time.Time) (item user.User, err error) {
+	ctx, span := startRepositorySpan(ctx, "INSERT", "users")
+	defer func() { finishRepositorySpan(span, err) }()
+
 	row := r.db.QueryRowContext(ctx, `
 		INSERT INTO users (
 			id,

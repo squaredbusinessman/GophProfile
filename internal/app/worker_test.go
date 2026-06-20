@@ -8,8 +8,32 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/squaredbusinessman/GophProfile/internal/config"
+	"github.com/squaredbusinessman/GophProfile/internal/domain/outbox"
 	queuekafka "github.com/squaredbusinessman/GophProfile/internal/queue/kafka"
+	"go.opentelemetry.io/otel"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
+
+// TestPublishPendingOutboxCreatesWorkerSpan проверяет business span фоновой публикации
+func TestPublishPendingOutboxCreatesWorkerSpan(t *testing.T) {
+	previous := otel.GetTracerProvider()
+	recorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+	otel.SetTracerProvider(provider)
+	t.Cleanup(func() {
+		_ = provider.Shutdown(context.Background())
+		otel.SetTracerProvider(previous)
+	})
+
+	service := NewOutboxPublisherService(&fakeOutboxEventStore{events: []outbox.Event{}}, &fakeEventPublisher{})
+	publishPendingOutbox(context.Background(), config.Config{Worker: config.WorkerConfig{OutboxBatchSize: 10}}, service)
+
+	spans := recorder.Ended()
+	if len(spans) != 1 || spans[0].Name() != "worker.outbox.publish" {
+		t.Fatalf("worker spans = %#v, want worker.outbox.publish", spans)
+	}
+}
 
 // TestRunWorkerWaitsForShutdownTimeout проверяет ожидание graceful timeout после отмены context
 func TestRunWorkerWaitsForShutdownTimeout(t *testing.T) {
