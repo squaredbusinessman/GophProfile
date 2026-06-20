@@ -22,9 +22,10 @@ var (
 )
 
 type Client struct {
-	bucket string
-	region string
-	api    objectStorageAPI
+	bucket    string
+	region    string
+	api       objectStorageAPI
+	telemetry s3Telemetry
 }
 
 type ObjectMetadata struct {
@@ -79,9 +80,10 @@ func NewClient(cfg config.S3Config) (*Client, error) {
 // newClientWithRegion создает S3 client с явно заданным region
 func newClientWithRegion(bucket string, region string, api objectStorageAPI) *Client {
 	return &Client{
-		bucket: bucket,
-		region: region,
-		api:    api,
+		bucket:    bucket,
+		region:    region,
+		api:       api,
+		telemetry: newS3Telemetry(),
 	}
 }
 
@@ -90,11 +92,14 @@ func (c *Client) Put(ctx context.Context, key string, reader io.Reader, size int
 	if err := validateKey(key); err != nil {
 		return err
 	}
+	ctx, operation := c.telemetry.startS3Operation(ctx, "Put", "PutObject", objectAttributes(size, contentType)...)
 
 	err := c.api.PutObject(ctx, c.bucket, key, reader, size, contentType)
 	if err != nil {
-		return wrapError("put object", key, err)
+		operation.finish(s3ResultError, err)
+		return wrapError("put object", err)
 	}
+	operation.finish(s3ResultSuccess, nil)
 
 	return nil
 }
@@ -105,14 +110,14 @@ func (c *Client) Get(ctx context.Context, key string) (io.ReadCloser, ObjectMeta
 		return nil, ObjectMetadata{}, err
 	}
 
-	metadata, err := c.api.StatObject(ctx, c.bucket, key)
+	metadata, err := c.statObject(ctx, key)
 	if err != nil {
-		return nil, ObjectMetadata{}, wrapError("stat object", key, err)
+		return nil, ObjectMetadata{}, wrapError("stat object", err)
 	}
 
-	object, err := c.api.GetObject(ctx, c.bucket, key)
+	object, err := c.getObject(ctx, key, metadata)
 	if err != nil {
-		return nil, ObjectMetadata{}, wrapError("get object", key, err)
+		return nil, ObjectMetadata{}, wrapError("get object", err)
 	}
 
 	return object, metadata, nil
@@ -124,13 +129,17 @@ func (c *Client) Delete(ctx context.Context, key string) error {
 		return err
 	}
 
+	ctx, operation := c.telemetry.startS3Operation(ctx, "Delete", "DeleteObject")
 	err := c.api.RemoveObject(ctx, c.bucket, key)
 	if err != nil {
 		if isNotFound(err) {
+			operation.finish(s3ResultSuccess, nil)
 			return nil
 		}
-		return wrapError("delete object", key, err)
+		operation.finish(s3ResultError, err)
+		return wrapError("delete object", err)
 	}
+	operation.finish(s3ResultSuccess, nil)
 
 	return nil
 }
@@ -141,13 +150,17 @@ func (c *Client) Exists(ctx context.Context, key string) (bool, error) {
 		return false, err
 	}
 
-	_, err := c.api.StatObject(ctx, c.bucket, key)
+	ctx, operation := c.telemetry.startS3Operation(ctx, "Exists", "HeadObject")
+	metadata, err := c.api.StatObject(ctx, c.bucket, key)
 	if err != nil {
 		if isNotFound(err) {
+			operation.finish(s3ResultNotFound, nil)
 			return false, nil
 		}
-		return false, wrapError("stat object", key, err)
+		operation.finish(s3ResultError, err)
+		return false, wrapError("stat object", err)
 	}
+	operation.finish(s3ResultSuccess, nil, objectAttributes(metadata.Size, metadata.ContentType)...)
 
 	return true, nil
 }
@@ -156,7 +169,7 @@ func (c *Client) Exists(ctx context.Context, key string) (bool, error) {
 func (c *Client) HealthCheck(ctx context.Context) error {
 	exists, err := c.api.BucketExists(ctx, c.bucket)
 	if err != nil {
-		return wrapError("check bucket", "", err)
+		return wrapError("check bucket", err)
 	}
 	if !exists {
 		return fmt.Errorf("%w: bucket %s", ErrNotFound, c.bucket)
@@ -165,10 +178,19 @@ func (c *Client) HealthCheck(ctx context.Context) error {
 }
 
 // EnsureBucket создает bucket если он отсутствует
-func (c *Client) EnsureBucket(ctx context.Context) error {
+func (c *Client) EnsureBucket(ctx context.Context) (resultErr error) {
+	ctx, operation := c.telemetry.startS3Operation(ctx, "EnsureBucket", "HeadBucket")
+	defer func() {
+		if resultErr != nil {
+			operation.finish(s3ResultError, resultErr)
+		} else {
+			operation.finish(s3ResultSuccess, nil)
+		}
+	}()
+
 	exists, err := c.api.BucketExists(ctx, c.bucket)
 	if err != nil {
-		return wrapError("check bucket", "", err)
+		return wrapError("check bucket", err)
 	}
 	if exists {
 		return nil
@@ -179,9 +201,40 @@ func (c *Client) EnsureBucket(ctx context.Context) error {
 		if checkErr == nil && exists {
 			return nil
 		}
-		return wrapError("create bucket", "", err)
+		return wrapError("create bucket", err)
 	}
 	return nil
+}
+
+// statObject получает metadata и измеряет HeadObject отдельно от GetObject
+func (c *Client) statObject(ctx context.Context, key string) (ObjectMetadata, error) {
+	ctx, operation := c.telemetry.startS3Operation(ctx, "Stat", "HeadObject")
+	metadata, err := c.api.StatObject(ctx, c.bucket, key)
+	if err != nil {
+		if isNotFound(err) {
+			operation.finish(s3ResultNotFound, nil)
+		} else {
+			operation.finish(s3ResultError, err)
+		}
+		return ObjectMetadata{}, err
+	}
+	operation.finish(s3ResultSuccess, nil, objectAttributes(metadata.Size, metadata.ContentType)...)
+	return metadata, nil
+}
+
+// getObject открывает поток объекта без дополнительного чтения body
+func (c *Client) getObject(ctx context.Context, key string, metadata ObjectMetadata) (io.ReadCloser, error) {
+	ctx, operation := c.telemetry.startS3Operation(ctx, "Get", "GetObject", objectAttributes(metadata.Size, metadata.ContentType)...)
+	object, err := c.api.GetObject(ctx, c.bucket, key)
+	if err != nil {
+		if isNotFound(err) {
+			operation.finish(s3ResultNotFound, nil)
+		} else {
+			operation.finish(s3ResultError, err)
+		}
+		return nil, err
+	}
+	return &observedReadCloser{body: object, operation: operation}, nil
 }
 
 // Bucket возвращает имя bucket хранилища
@@ -322,14 +375,14 @@ func objectMetadata(key string, info minio.ObjectInfo) ObjectMetadata {
 }
 
 // wrapError мапит ошибку SDK в ошибку S3-слоя
-func wrapError(operation string, key string, err error) error {
+func wrapError(operation string, err error) error {
 	if err == nil {
 		return nil
 	}
 	if isNotFound(err) {
-		return fmt.Errorf("%s %s: %w", operation, key, ErrNotFound)
+		return fmt.Errorf("%s: %w", operation, ErrNotFound)
 	}
-	return fmt.Errorf("%s %s: %w", operation, key, err)
+	return fmt.Errorf("%s: %w", operation, err)
 }
 
 // isNotFound определяет отсутствие объекта или bucket по SDK-ошибке
