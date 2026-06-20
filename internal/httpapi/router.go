@@ -20,6 +20,10 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/squaredbusinessman/GophProfile/internal/app"
 	"github.com/squaredbusinessman/GophProfile/internal/domain/avatar"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	semconv "go.opentelemetry.io/otel/semconv/v1.40.0"
 )
 
 var requestCounter uint64
@@ -52,6 +56,8 @@ type Router struct {
 	avatarReader   AvatarReader
 	avatarDeleter  AvatarDeleter
 	mux            *http.ServeMux
+	// telemetry содержит HTTP Counter и in-flight Gauge
+	telemetry httpServerTelemetry
 }
 
 type HealthCheck func(ctx context.Context) error
@@ -92,6 +98,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 		avatarReader:   cfg.AvatarReader,
 		avatarDeleter:  cfg.AvatarDeleter,
 		mux:            http.NewServeMux(),
+		telemetry:      newHTTPServerTelemetry(otel.Meter(instrumentationName)),
 	}
 
 	router.mux.HandleFunc("/health", router.handleHealth)
@@ -101,22 +108,38 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	router.mux.HandleFunc("/api/v1/users/resolve", router.handleUserResolve)
 	router.mux.HandleFunc("/api/v1/users/", router.handleUsers)
 
-	return router
+	return otelhttp.NewHandler(
+		router,
+		"http.server",
+		otelhttp.WithFilter(func(req *http.Request) bool {
+			return shouldObserveHTTP(req.URL.Path)
+		}),
+		otelhttp.WithSpanNameFormatter(func(_ string, req *http.Request) string {
+			return req.Method + " " + normalizedHTTPRoute(req.URL.Path)
+		}),
+		otelhttp.WithMetricAttributesFn(func(req *http.Request) []attribute.KeyValue {
+			return []attribute.KeyValue{semconv.HTTPRoute(normalizedHTTPRoute(req.URL.Path))}
+		}),
+	)
 }
 
 // ServeHTTP обрабатывает HTTP-запрос и пишет access log с корректным уровнем
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	if shouldObserveHTTP(req.URL.Path) {
+		r.serveObserved(w, req, normalizedHTTPRoute(req.URL.Path))
+		return
+	}
+	r.serveRequest(newStatusRecorder(w), req)
+}
+
+// serveRequest применяет HTTP policy, вызывает handler и пишет access log
+func (r *Router) serveRequest(rec *statusRecorder, req *http.Request) {
 	startedAt := time.Now()
 	requestID := requestID(req)
-	w.Header().Set("X-Request-ID", requestID)
+	rec.Header().Set("X-Request-ID", requestID)
 	requestCtx := app.ContextWithLogger(req.Context(), r.logger)
 	requestCtx = app.ContextWithRequestID(requestCtx, requestID)
 	req = req.WithContext(requestCtx)
-
-	rec := &statusRecorder{
-		ResponseWriter: w,
-		statusCode:     http.StatusOK,
-	}
 
 	if !r.handleCORS(rec, req) {
 		if r.shouldLimit(req) && !r.allowRequest(req) {
@@ -867,6 +890,11 @@ type statusRecorder struct {
 	http.ResponseWriter
 	statusCode   int
 	bytesWritten int
+}
+
+// newStatusRecorder создаёт recorder со статусом успешного ответа по умолчанию
+func newStatusRecorder(w http.ResponseWriter) *statusRecorder {
+	return &statusRecorder{ResponseWriter: w, statusCode: http.StatusOK}
 }
 
 // WriteHeader сохраняет HTTP-статус перед отправкой ответа клиенту

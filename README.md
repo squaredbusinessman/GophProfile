@@ -124,13 +124,18 @@ docker compose -f deploy/vault/docker-compose.yml up -d
 Сервисы:
 
 - server API: `http://localhost:8080`
-- server metrics: `http://localhost:9090/metrics`
-- worker metrics: `http://localhost:9091/metrics`
+- server metrics: `http://localhost:9464/metrics`
+- worker metrics: `http://localhost:9465/metrics`
 - frontend-build: `http://localhost:3000/web/`
 - PostgreSQL: `localhost:5432`
 - Kafka: `kafka:9092` внутри compose-сети
 - MinIO API: `http://localhost:9000`
 - MinIO Console: `http://localhost:9001`
+- Prometheus: `http://localhost:9090`
+- Grafana: `http://localhost:3001` (`admin` / `admin`)
+- Jaeger: `http://localhost:16686`
+- Loki API: `http://localhost:3100`
+- Alloy UI: `http://localhost:12345`
 
 В локальном compose `server` и `worker` автоматически создают MinIO bucket из
 `S3_BUCKET`, если он еще отсутствует.
@@ -138,6 +143,18 @@ docker compose -f deploy/vault/docker-compose.yml up -d
 ## Observability
 
 Оба процесса используют единый OpenTelemetry bootstrap. Конфигурация:
+
+Потоки observability разделены по назначению:
+
+- Zerolog пишет структурированные JSON logs в stdout, инфраструктурный агент
+  отправляет их в Loki, визуализация выполняется в Grafana
+- OpenTelemetry metrics публикуются в Prometheus format через `/metrics`,
+  Prometheus выполняет scrape, визуализация выполняется в Grafana
+- OpenTelemetry traces отправляются по OTLP в Jaeger
+
+Приложение не отправляет логи напрямую в Loki: это сохраняет бизнес-процессы
+независимыми от доступности logging backend и оставляет доставку логов на
+уровне инфраструктуры
 
 - `OTEL_ENABLED` (по умолчанию `false`)
 - `OTEL_SERVICE_NAME` (`gophprofile-server` или `gophprofile-worker`)
@@ -150,8 +167,18 @@ docker compose -f deploy/vault/docker-compose.yml up -d
 - `LOG_FORMAT` (по умолчанию `json`; `console` разрешён только при `APP_ENV=local`)
 
 Metrics HTTP server запускается и корректно останавливается даже в no-op режиме.
-Для отправки spans в локальном compose добавьте OTLP collector и установите
-`OTEL_ENABLED=true`.
+Локальный compose включает Prometheus, Grafana, Loki, Alloy и Jaeger. Для
+`server` и `worker` telemetry включена, а service names заданы раздельно.
+Alloy читает только stdout контейнеров `server` и `worker` через Docker API и
+отправляет записи в Loki. Grafana автоматически получает data sources и
+dashboard `GophProfile HTTP RED`.
+
+HTTP API инструментирован через `otelhttp`. Для API-запросов экспортируются
+server spans и RED-метрики `http.server.request.count`,
+`http.server.request.duration` и `http.server.active_requests`. Динамические
+идентификаторы заменяются шаблонами `{avatar_id}` и `{user_id}` в `http.route`.
+Маршруты `/health` и `/metrics` исключены из tracing и RED-метрик, чтобы probe
+и scrape-трафик не искажали RPS, error ratio и p95 пользовательского API.
 
 Для повторного запуска без пересборки образов:
 

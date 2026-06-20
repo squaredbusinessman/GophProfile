@@ -124,6 +124,18 @@ bucket_exists() {
 	compose exec -T minio sh -c "test -d /data/$S3_BUCKET" >/dev/null 2>&1
 }
 
+prometheus_ready() {
+	compose exec -T prometheus wget -qO- http://127.0.0.1:9090/-/ready >/dev/null 2>&1
+}
+
+loki_ready() {
+	compose exec -T frontend-build wget -qO- http://loki:3100/loki/api/v1/label/service_name/values >/dev/null 2>&1
+}
+
+grafana_ready() {
+	compose exec -T grafana wget -qO- http://127.0.0.1:3000/api/health >/dev/null 2>&1
+}
+
 wait_for() {
 	label=$1
 	shift
@@ -172,6 +184,11 @@ wait_for "minio running" is_running minio || fail_wait
 wait_for "server running" is_running server || fail_wait
 wait_for "worker running" is_running worker || fail_wait
 wait_for "frontend running" is_running frontend-build || fail_wait
+wait_for "prometheus ready" prometheus_ready || fail_wait
+wait_for "loki ready" loki_ready || fail_wait
+wait_for "alloy running" is_running alloy || fail_wait
+wait_for "jaeger running" is_running jaeger || fail_wait
+wait_for "grafana ready" grafana_ready || fail_wait
 wait_for "server healthcheck" server_health_ok || fail_wait
 wait_for "frontend /web/" frontend_ok || fail_wait
 wait_for "frontend proxy /health" frontend_proxy_health_ok || fail_wait
@@ -185,6 +202,13 @@ log "Frontend:        http://localhost:3000/web/"
 log "MinIO Console:   http://localhost:9001"
 log "PostgreSQL:      localhost:5432"
 log "Kafka:           localhost:9092"
+log "Server metrics:  http://localhost:9464/metrics"
+log "Worker metrics:  http://localhost:9465/metrics"
+log "Prometheus:      http://localhost:9090"
+log "Grafana:         http://localhost:3001 (admin/admin)"
+log "Jaeger:          http://localhost:16686"
+log "Loki API:        http://localhost:3100"
+log "Alloy UI:        http://localhost:12345"
 log ""
 log "Stop:            docker compose -f deploy/docker-compose.yml down"
 log "Logs:            docker compose -f deploy/docker-compose.yml logs -f server worker"

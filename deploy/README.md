@@ -9,6 +9,11 @@
 - `migrate`
 - `kafka`
 - `minio`
+- `prometheus`
+- `grafana`
+- `loki`
+- `alloy`
+- `jaeger`
 
 ## Запуск
 
@@ -54,6 +59,32 @@ docker compose -f deploy/docker-compose.yml down -v
 - Kafka: `localhost:9092`
 - MinIO API: `http://localhost:9000`
 - MinIO Console: `http://localhost:9001`
+- Server metrics: `http://localhost:9464/metrics`
+- Worker metrics: `http://localhost:9465/metrics`
+- Prometheus: `http://localhost:9090`
+- Grafana: `http://localhost:3001` (`admin` / `admin`)
+- Jaeger: `http://localhost:16686`
+- Loki API: `http://localhost:3100`
+- Alloy UI: `http://localhost:12345`
+
+## Observability
+
+Prometheus забирает метрики напрямую с отдельных metrics endpoints `server` и
+`worker`. Jaeger принимает OTLP по gRPC на `jaeger:4317`. Alloy обнаруживает
+контейнеры через Docker API, выбирает только application logs от `server` и
+`worker` и отправляет их в Loki.
+
+Grafana provisioning автоматически создает data sources Prometheus, Loki и
+Jaeger, а также dashboard `GophProfile HTTP RED`. Связи Loki -> Jaeger и
+Jaeger -> Loki используют поля `trace_id`, `span_id` и `service_name`.
+
+Jaeger работает в all-in-one режиме с in-memory storage. Это осознанная
+настройка локальной разработки: при перезапуске Jaeger трейсы удаляются. Loki,
+Prometheus и Grafana используют именованные Docker volumes.
+
+Alloy получает read-only доступ к Docker socket. Для production вместо этого
+нужен инфраструктурный log collector с минимально необходимыми правами и
+внешние persistent storage для telemetry backends.
 
 ## Env
 

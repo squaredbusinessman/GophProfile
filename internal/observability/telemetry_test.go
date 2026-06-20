@@ -103,6 +103,25 @@ func TestShutdownFlushesWithoutHanging(t *testing.T) {
 	}
 }
 
+// TestEndpointURLDetection проверяет различение URL и адреса OTLP gRPC
+func TestEndpointURLDetection(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		endpoint string
+		want     bool
+	}{
+		{name: "host and port", endpoint: "jaeger:4317", want: false},
+		{name: "HTTP URL", endpoint: "http://jaeger:4317", want: true},
+		{name: "HTTPS URL", endpoint: "https://collector.example.com:4317", want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isEndpointURL(tc.endpoint); got != tc.want {
+				t.Fatalf("isEndpointURL(%q) = %t, want %t", tc.endpoint, got, tc.want)
+			}
+		})
+	}
+}
+
 // countingExporter подсчитывает экспортированные интервалы трассировки
 type countingExporter struct {
 	// exported хранит количество экспортированных интервалов трассировки

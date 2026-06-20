@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync"
 
@@ -101,7 +100,7 @@ func NewTelemetry(ctx context.Context, cfg config.Config) (*Telemetry, error) {
 // newTraceExporter создаёт OTLP-экспортёр трассировок с настройками подключения
 func newTraceExporter(ctx context.Context, cfg config.ObservabilityConfig) (*otlptrace.Exporter, error) {
 	opts := make([]otlptracegrpc.Option, 0, 2)
-	if parsed, err := url.Parse(cfg.OTLPEndpoint); err == nil && parsed.Scheme != "" {
+	if isEndpointURL(cfg.OTLPEndpoint) {
 		opts = append(opts, otlptracegrpc.WithEndpointURL(cfg.OTLPEndpoint))
 	} else {
 		opts = append(opts, otlptracegrpc.WithEndpoint(cfg.OTLPEndpoint))
@@ -110,6 +109,11 @@ func newTraceExporter(ctx context.Context, cfg config.ObservabilityConfig) (*otl
 		opts = append(opts, otlptracegrpc.WithInsecure())
 	}
 	return otlptracegrpc.New(ctx, opts...)
+}
+
+// isEndpointURL отличает полный URL от адреса host:port
+func isEndpointURL(endpoint string) bool {
+	return strings.Contains(endpoint, "://")
 }
 
 // traceSampler создаёт стратегию семплирования трассировок из конфигурации
