@@ -10,12 +10,13 @@ import (
 
 const localS3BucketEnsureTimeout = 30 * time.Second
 
+// S3BucketEnsurer описывает подготовку бакета S3 при запуске приложения
 type S3BucketEnsurer interface {
 	EnsureBucket(ctx context.Context) error
 	Bucket() string
 }
 
-// EnsureLocalS3Bucket создает S3 bucket при локальном запуске приложения
+// EnsureLocalS3Bucket создаёт бакет S3 при локальном запуске приложения
 func EnsureLocalS3Bucket(ctx context.Context, cfg config.Config, storage S3BucketEnsurer) error {
 	if cfg.Env != "local" {
 		return nil

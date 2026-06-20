@@ -1,3 +1,4 @@
+// Package main запускает HTTP-сервер приложения
 package main
 
 import (

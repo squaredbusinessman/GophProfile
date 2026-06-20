@@ -1,3 +1,4 @@
+// Package httpapi предоставляет HTTP API приложения
 package httpapi
 
 import (
@@ -7,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	// Регистрируем декодер JPEG для проверки загружаемых изображений
 	_ "image/jpeg"
 	_ "image/png"
 	"io"
@@ -28,21 +30,35 @@ import (
 
 var requestCounter uint64
 
+// RouterConfig содержит зависимости и параметры HTTP-маршрутизатора
 type RouterConfig struct {
-	ServiceName    string
-	Version        string
-	Logger         zerolog.Logger
+	// ServiceName содержит имя сервиса для служебных ответов
+	ServiceName string
+	// Version содержит версию сервиса
+	Version string
+	// Logger задаёт базовый журнал приложения
+	Logger zerolog.Logger
+	// AllowedOrigins содержит разрешённые источники CORS
 	AllowedOrigins []string
-	RateLimitRPS   int
+	// RateLimitRPS задаёт среднее число запросов в секунду на клиента
+	RateLimitRPS int
+	// RateLimitBurst задаёт допустимый всплеск запросов на клиента
 	RateLimitBurst int
-	HealthChecks   map[string]HealthCheck
-	DefaultAvatar  DefaultAvatar
-	UserResolver   UserResolver
+	// HealthChecks содержит проверки внешних зависимостей
+	HealthChecks map[string]HealthCheck
+	// DefaultAvatar содержит изображение-заглушку
+	DefaultAvatar DefaultAvatar
+	// UserResolver сопоставляет электронную почту с пользователем
+	UserResolver UserResolver
+	// AvatarUploader загружает новые аватары
 	AvatarUploader AvatarUploader
-	AvatarReader   AvatarReader
-	AvatarDeleter  AvatarDeleter
+	// AvatarReader читает аватары и их метаданные
+	AvatarReader AvatarReader
+	// AvatarDeleter удаляет аватары
+	AvatarDeleter AvatarDeleter
 }
 
+// Router обрабатывает HTTP-запросы приложения
 type Router struct {
 	serviceName    string
 	version        string
@@ -56,20 +72,24 @@ type Router struct {
 	avatarReader   AvatarReader
 	avatarDeleter  AvatarDeleter
 	mux            *http.ServeMux
-	// telemetry содержит HTTP Counter и in-flight Gauge
+	// telemetry содержит счётчик HTTP-запросов и число выполняемых запросов
 	telemetry httpServerTelemetry
 }
 
+// HealthCheck описывает проверку доступности внешней зависимости
 type HealthCheck func(ctx context.Context) error
 
+// UserResolver описывает сопоставление электронной почты с пользователем
 type UserResolver interface {
 	ResolveUserByEmail(ctx context.Context, email string) (app.UserResolveResult, error)
 }
 
+// AvatarUploader описывает загрузку нового аватара
 type AvatarUploader interface {
 	UploadAvatar(ctx context.Context, req app.AvatarUploadRequest) (app.AvatarUploadResult, error)
 }
 
+// AvatarReader описывает чтение объектов и метаданных аватаров
 type AvatarReader interface {
 	GetAvatarByID(ctx context.Context, avatarID string, size string, format string) (app.AvatarReadResult, error)
 	GetLatestAvatarByUserID(ctx context.Context, userID string, size string, format string) (app.AvatarReadResult, error)
@@ -78,12 +98,13 @@ type AvatarReader interface {
 	ListAvatarsByUserID(ctx context.Context, userID string, limit int, offset int) (app.AvatarListResult, error)
 }
 
+// AvatarDeleter описывает логическое удаление аватаров
 type AvatarDeleter interface {
 	DeleteAvatarByID(ctx context.Context, avatarID string, requesterUserID string) error
 	DeleteLatestAvatarByUserID(ctx context.Context, targetUserID string, requesterUserID string) error
 }
 
-// NewRouter создает HTTP router приложения
+// NewRouter создаёт HTTP-маршрутизатор приложения
 func NewRouter(cfg RouterConfig) http.Handler {
 	router := &Router{
 		serviceName:    cfg.ServiceName,
@@ -123,7 +144,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	)
 }
 
-// ServeHTTP обрабатывает HTTP-запрос и пишет access log с корректным уровнем
+// ServeHTTP обрабатывает HTTP-запрос и записывает журнал доступа с корректным уровнем
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if shouldObserveHTTP(req.URL.Path) {
 		r.serveObserved(w, req, normalizedHTTPRoute(req.URL.Path))
@@ -651,63 +672,105 @@ func isInternalAvatarDeleteError(err error) bool {
 	return !errors.Is(err, app.ErrAvatarNotFound) && !errors.Is(err, app.ErrAvatarForbidden)
 }
 
+// HealthResponse содержит состояние сервиса и его зависимостей
 type HealthResponse struct {
-	Status    string            `json:"status"`
-	Service   string            `json:"service"`
-	Version   string            `json:"version"`
-	Timestamp time.Time         `json:"timestamp"`
-	Checks    map[string]string `json:"checks"`
+	// Status содержит общее состояние сервиса
+	Status string `json:"status"`
+	// Service содержит имя сервиса
+	Service string `json:"service"`
+	// Version содержит версию сервиса
+	Version string `json:"version"`
+	// Timestamp содержит время формирования ответа
+	Timestamp time.Time `json:"timestamp"`
+	// Checks содержит состояния внешних зависимостей
+	Checks map[string]string `json:"checks"`
 }
 
+// AvatarUploadResponse содержит результат загрузки аватара
 type AvatarUploadResponse struct {
-	ID        string    `json:"id"`
-	UserID    string    `json:"user_id"`
-	URL       string    `json:"url"`
-	Status    string    `json:"status"`
-	Width     int       `json:"width,omitempty"`
-	Height    int       `json:"height,omitempty"`
+	// ID содержит идентификатор аватара
+	ID string `json:"id"`
+	// UserID содержит идентификатор владельца
+	UserID string `json:"user_id"`
+	// URL содержит относительный адрес аватара
+	URL string `json:"url"`
+	// Status содержит состояние обработки
+	Status string `json:"status"`
+	// Width содержит ширину изображения в пикселях
+	Width int `json:"width,omitempty"`
+	// Height содержит высоту изображения в пикселях
+	Height int `json:"height,omitempty"`
+	// CreatedAt содержит время создания аватара
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// UserResolveRequest содержит запрос сопоставления пользователя
 type UserResolveRequest struct {
+	// Email содержит адрес электронной почты
 	Email string `json:"email"`
 }
 
+// UserResolveResponse содержит сведения о найденном или созданном пользователе
 type UserResolveResponse struct {
-	ID        string    `json:"id"`
-	UserID    string    `json:"user_id"`
-	Email     string    `json:"email"`
+	// ID содержит идентификатор результата
+	ID string `json:"id"`
+	// UserID содержит идентификатор пользователя
+	UserID string `json:"user_id"`
+	// Email содержит нормализованный адрес электронной почты
+	Email string `json:"email"`
+	// CreatedAt содержит время создания пользователя
 	CreatedAt time.Time `json:"created_at"`
+	// UpdatedAt содержит время последнего изменения пользователя
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// AvatarMetadataResponse содержит публичные метаданные аватара
 type AvatarMetadataResponse struct {
-	ID         string            `json:"id"`
-	UserID     string            `json:"user_id"`
-	FileName   string            `json:"file_name"`
-	MimeType   string            `json:"mime_type"`
-	SizeBytes  int64             `json:"size_bytes"`
-	Width      *int              `json:"width"`
-	Height     *int              `json:"height"`
-	Status     string            `json:"status"`
-	URL        string            `json:"url"`
+	// ID содержит идентификатор аватара
+	ID string `json:"id"`
+	// UserID содержит идентификатор владельца
+	UserID string `json:"user_id"`
+	// FileName содержит исходное имя файла
+	FileName string `json:"file_name"`
+	// MimeType содержит MIME-тип оригинала
+	MimeType string `json:"mime_type"`
+	// SizeBytes содержит размер оригинала в байтах
+	SizeBytes int64 `json:"size_bytes"`
+	// Width содержит ширину оригинала в пикселях
+	Width *int `json:"width"`
+	// Height содержит высоту оригинала в пикселях
+	Height *int `json:"height"`
+	// Status содержит состояние обработки
+	Status string `json:"status"`
+	// URL содержит относительный адрес оригинала
+	URL string `json:"url"`
+	// Thumbnails содержит доступные миниатюры
 	Thumbnails []AvatarThumbnail `json:"thumbnails"`
-	CreatedAt  time.Time         `json:"created_at"`
-	UpdatedAt  time.Time         `json:"updated_at"`
+	// CreatedAt содержит время создания аватара
+	CreatedAt time.Time `json:"created_at"`
+	// UpdatedAt содержит время последнего изменения аватара
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// AvatarThumbnail содержит размер и адрес миниатюры
 type AvatarThumbnail struct {
+	// Size содержит размер миниатюры
 	Size string `json:"size"`
-	URL  string `json:"url"`
+	// URL содержит относительный адрес миниатюры
+	URL string `json:"url"`
 }
 
+// AvatarListResponse содержит страницу метаданных аватаров
 type AvatarListResponse struct {
-	Items  []AvatarMetadataResponse `json:"items"`
-	Limit  int                      `json:"limit"`
-	Offset int                      `json:"offset"`
+	// Items содержит элементы текущей страницы
+	Items []AvatarMetadataResponse `json:"items"`
+	// Limit содержит максимальное число элементов страницы
+	Limit int `json:"limit"`
+	// Offset содержит смещение страницы
+	Offset int `json:"offset"`
 }
 
-// avatarMetadataResponse собирает JSON metadata avatar
+// avatarMetadataResponse собирает метаданные аватара для ответа JSON
 func avatarMetadataResponse(item avatar.Avatar) AvatarMetadataResponse {
 	response := AvatarMetadataResponse{
 		ID:         item.ID,

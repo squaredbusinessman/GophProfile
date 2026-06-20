@@ -1,3 +1,4 @@
+// Package config загружает и проверяет конфигурацию приложения
 package config
 
 import (

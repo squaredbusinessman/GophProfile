@@ -17,26 +17,32 @@ import (
 	storages3 "github.com/squaredbusinessman/GophProfile/internal/storage/s3"
 )
 
+// ErrUserNotFound сообщает об отсутствии пользователя для загрузки аватара
 var ErrUserNotFound = errors.New("user not found")
 
+// UserLookup описывает получение пользователя для операций с аватаром
 type UserLookup interface {
 	GetUser(ctx context.Context, id string) (user.User, error)
 }
 
+// AvatarOutboxStore описывает атомарное сохранение аватара и события outbox
 type AvatarOutboxStore interface {
 	CreateAvatarWithOutbox(ctx context.Context, item avatar.Avatar, event outbox.Event) error
 	MarkOutboxPublished(ctx context.Context, id string, publishedAt time.Time) error
 	MarkOutboxPublishAttemptFailed(ctx context.Context, id string, publishErr error, updatedAt time.Time) error
 }
 
+// ObjectStore описывает загрузку объекта в хранилище
 type ObjectStore interface {
 	Put(ctx context.Context, key string, reader io.Reader, size int64, contentType string) error
 }
 
+// EventPublisher описывает публикацию события в брокер сообщений
 type EventPublisher interface {
-	Publish(ctx context.Context, topic string, key string, payload []byte) error
+	Publish(ctx context.Context, topic string, key string, payload []byte, headers map[string]string) error
 }
 
+// AvatarUploadService выполняет загрузку оригинала аватара и создаёт событие обработки
 type AvatarUploadService struct {
 	users        UserLookup
 	avatarOutbox AvatarOutboxStore
@@ -45,40 +51,67 @@ type AvatarUploadService struct {
 	now          func() time.Time
 }
 
+// AvatarUploadRequest содержит данные запроса на загрузку аватара
 type AvatarUploadRequest struct {
-	UserID      string
-	FileName    string
+	// UserID содержит идентификатор владельца аватара
+	UserID string
+	// FileName содержит исходное имя файла
+	FileName string
+	// ContentType содержит MIME-тип файла
 	ContentType string
-	Size        int64
-	Width       int
-	Height      int
-	Reader      io.Reader
+	// Size содержит заявленный размер файла в байтах
+	Size int64
+	// Width содержит заявленную ширину изображения в пикселях
+	Width int
+	// Height содержит заявленную высоту изображения в пикселях
+	Height int
+	// Reader предоставляет содержимое загружаемого файла
+	Reader io.Reader
 }
 
+// AvatarUploadResult содержит сведения о созданном аватаре
 type AvatarUploadResult struct {
-	ID                string
-	UserID            string
-	FileName          string
-	ContentType       string
-	Size              int64
-	Width             int
-	Height            int
-	Status            avatar.Status
+	// ID содержит идентификатор аватара
+	ID string
+	// UserID содержит идентификатор владельца аватара
+	UserID string
+	// FileName содержит исходное имя файла
+	FileName string
+	// ContentType содержит MIME-тип файла
+	ContentType string
+	// Size содержит фактический размер файла в байтах
+	Size int64
+	// Width содержит заявленную ширину изображения в пикселях
+	Width int
+	// Height содержит заявленную высоту изображения в пикселях
+	Height int
+	// Status содержит состояние обработки аватара
+	Status avatar.Status
+	// OriginalObjectKey содержит ключ оригинала в объектном хранилище
 	OriginalObjectKey string
-	CreatedAt         time.Time
+	// CreatedAt содержит время создания аватара
+	CreatedAt time.Time
 }
 
+// AvatarProcessEvent содержит данные события обработки аватара
 type AvatarProcessEvent struct {
-	AvatarID          string `json:"avatar_id"`
-	UserID            string `json:"user_id"`
+	// AvatarID содержит идентификатор аватара
+	AvatarID string `json:"avatar_id"`
+	// UserID содержит идентификатор владельца аватара
+	UserID string `json:"user_id"`
+	// OriginalObjectKey содержит ключ оригинала в объектном хранилище
 	OriginalObjectKey string `json:"original_object_key"`
+	// Thumb100ObjectKey содержит ключ миниатюры размером 100 на 100 пикселей
 	Thumb100ObjectKey string `json:"thumb_100_object_key"`
+	// Thumb300ObjectKey содержит ключ миниатюры размером 300 на 300 пикселей
 	Thumb300ObjectKey string `json:"thumb_300_object_key"`
-	ContentType       string `json:"content_type"`
-	Attempt           int    `json:"attempt"`
+	// ContentType содержит MIME-тип изображения
+	ContentType string `json:"content_type"`
+	// Attempt содержит номер попытки обработки
+	Attempt int `json:"attempt"`
 }
 
-// NewAvatarUploadService создает service загрузки avatar
+// NewAvatarUploadService создаёт сервис загрузки аватара
 func NewAvatarUploadService(users UserLookup, avatarOutbox AvatarOutboxStore, objects ObjectStore, publisher EventPublisher) *AvatarUploadService {
 	return &AvatarUploadService{
 		users:        users,
@@ -89,7 +122,7 @@ func NewAvatarUploadService(users UserLookup, avatarOutbox AvatarOutboxStore, ob
 	}
 }
 
-// UploadAvatar сохраняет original в S3 и атомарно создает avatar с outbox событием
+// UploadAvatar сохраняет оригинал в S3 и атомарно создаёт аватар с событием outbox
 func (s *AvatarUploadService) UploadAvatar(ctx context.Context, req AvatarUploadRequest) (AvatarUploadResult, error) {
 	if s.users == nil || s.avatarOutbox == nil || s.objects == nil || s.publisher == nil {
 		return AvatarUploadResult{}, fmt.Errorf("avatar upload service is not configured")
@@ -154,6 +187,7 @@ func (s *AvatarUploadService) UploadAvatar(ctx context.Context, req AvatarUpload
 		Topic:     queuekafka.TopicAvatarProcess,
 		Key:       avatarID,
 		Payload:   payload,
+		Headers:   queuekafka.InjectTraceContext(ctx, nil),
 		Status:    outbox.StatusPending,
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -178,9 +212,9 @@ func (s *AvatarUploadService) UploadAvatar(ctx context.Context, req AvatarUpload
 	}, nil
 }
 
-// publishOutboxEvent пытается быстро опубликовать outbox событие после commit
+// publishOutboxEvent пытается опубликовать событие outbox сразу после фиксации транзакции
 func (s *AvatarUploadService) publishOutboxEvent(ctx context.Context, event outbox.Event) {
-	if err := s.publisher.Publish(ctx, event.Topic, event.Key, event.Payload); err != nil {
+	if err := s.publisher.Publish(ctx, event.Topic, event.Key, event.Payload, event.Headers); err != nil {
 		_ = s.avatarOutbox.MarkOutboxPublishAttemptFailed(ctx, event.ID, err, s.now().UTC())
 		return
 	}

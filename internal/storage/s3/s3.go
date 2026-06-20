@@ -1,3 +1,4 @@
+// Package s3 предоставляет инструментированный клиент объектного хранилища S3
 package s3
 
 import (
@@ -16,11 +17,15 @@ import (
 )
 
 var (
-	ErrNotFound      = errors.New("s3 object not found")
-	ErrInvalidKey    = errors.New("invalid s3 object key")
+	// ErrNotFound сообщает об отсутствии объекта S3
+	ErrNotFound = errors.New("s3 object not found")
+	// ErrInvalidKey сообщает о недопустимом ключе объекта S3
+	ErrInvalidKey = errors.New("invalid s3 object key")
+	// ErrInvalidConfig сообщает о недопустимой конфигурации S3
 	ErrInvalidConfig = errors.New("invalid s3 config")
 )
 
+// Client выполняет операции с объектами S3 и записывает их телеметрию
 type Client struct {
 	bucket    string
 	region    string
@@ -28,12 +33,19 @@ type Client struct {
 	telemetry s3Telemetry
 }
 
+// ObjectMetadata содержит безопасные метаданные объекта S3
 type ObjectMetadata struct {
-	Key          string
-	ContentType  string
-	Size         int64
-	ETag         string
+	// Key содержит ключ объекта и не экспортируется в телеметрию
+	Key string
+	// ContentType содержит MIME-тип объекта
+	ContentType string
+	// Size содержит размер объекта в байтах
+	Size int64
+	// ETag содержит идентификатор версии объекта
+	ETag string
+	// LastModified содержит время последнего изменения объекта
 	LastModified time.Time
+	// UserMetadata содержит пользовательские метаданные объекта
 	UserMetadata map[string]string
 }
 
@@ -50,7 +62,7 @@ type minioAdapter struct {
 	sdk *minio.Client
 }
 
-// NewClient создает S3-compatible client из конфигурации приложения
+// NewClient создаёт S3-совместимый клиент из конфигурации приложения
 func NewClient(cfg config.S3Config) (*Client, error) {
 	endpoint, secure, err := parseEndpoint(cfg.Endpoint)
 	if err != nil {
@@ -77,7 +89,7 @@ func NewClient(cfg config.S3Config) (*Client, error) {
 	return newClientWithRegion(cfg.Bucket, cfg.Region, &minioAdapter{sdk: sdk}), nil
 }
 
-// newClientWithRegion создает S3 client с явно заданным region
+// newClientWithRegion создаёт клиент S3 с явно заданным регионом
 func newClientWithRegion(bucket string, region string, api objectStorageAPI) *Client {
 	return &Client{
 		bucket:    bucket,
@@ -104,7 +116,7 @@ func (c *Client) Put(ctx context.Context, key string, reader io.Reader, size int
 	return nil
 }
 
-// Get возвращает поток объекта и его metadata
+// Get возвращает поток объекта и его метаданные
 func (c *Client) Get(ctx context.Context, key string) (io.ReadCloser, ObjectMetadata, error) {
 	if err := validateKey(key); err != nil {
 		return nil, ObjectMetadata{}, err

@@ -11,11 +11,12 @@ import (
 	"github.com/squaredbusinessman/GophProfile/internal/domain/user"
 )
 
+// UserRepository сохраняет и читает пользователей в PostgreSQL
 type UserRepository struct {
 	db *sql.DB
 }
 
-// NewUserRepository создает repository для работы с пользователями в PostgreSQL
+// NewUserRepository создаёт репозиторий пользователей в PostgreSQL
 func NewUserRepository(db *sql.DB) *UserRepository {
 	return &UserRepository{db: db}
 }
@@ -68,7 +69,7 @@ func (r *UserRepository) GetUser(ctx context.Context, id string) (item user.User
 	return scanUser(row)
 }
 
-// GetUserByEmail возвращает активного пользователя по нормализованному email
+// GetUserByEmail возвращает активного пользователя по нормализованной электронной почте
 func (r *UserRepository) GetUserByEmail(ctx context.Context, email string) (item user.User, err error) {
 	ctx, span := startRepositorySpan(ctx, "SELECT", "users")
 	defer func() { finishRepositorySpan(span, err) }()

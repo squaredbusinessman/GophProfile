@@ -202,6 +202,18 @@ Prometheus получает `s3.client.operation.count` и
 `s3.client.operation.duration`; Grafana показывает S3 operation rate, error
 ratio и p95 latency отдельно для `server` и `worker`.
 
+Kafka использует W3C `traceparent`, `tracestate` и baggage в message headers.
+Carrier сохраняется вместе с outbox event в PostgreSQL JSONB, поэтому delayed
+publish после restart продолжает исходный HTTP trace. Producer повторно
+инжектирует context своего `PRODUCER` span, consumer извлекает remote parent и
+создаёт `CONSUMER` span, а commit offset записывается отдельным client span и
+event после успешного handler.
+
+Retry и dead-letter публикации наследуют trace context и неизвестные headers из
+consumer context. Payload и message key не записываются в logs, spans или
+metric labels. Kafka operation count, client duration и process duration
+доступны в Prometheus и на Kafka-панелях Grafana.
+
 Для повторного запуска без пересборки образов:
 
 ```bash

@@ -12,6 +12,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/squaredbusinessman/GophProfile/internal/domain/avatar"
+	"github.com/squaredbusinessman/GophProfile/internal/domain/outbox"
 	"github.com/squaredbusinessman/GophProfile/internal/domain/user"
 	"go.opentelemetry.io/otel"
 )
@@ -163,6 +164,41 @@ func TestIntegrationPostgresQueryCreatesChildSpan(t *testing.T) {
 		}
 	}
 	t.Fatal("INSERT users span was not recorded")
+}
+
+// TestIntegrationOutboxHeadersRoundTrip проверяет JSONB carrier на реальном PostgreSQL
+func TestIntegrationOutboxHeadersRoundTrip(t *testing.T) {
+	db := openIntegrationDB(t)
+	cleanupIntegrationTables(t, db)
+	t.Cleanup(func() {
+		cleanupIntegrationTables(t, db)
+	})
+
+	now := time.Date(2026, 6, 20, 11, 0, 0, 0, time.UTC)
+	event := outbox.Event{
+		ID:      "de1c2054-ed30-4967-867c-e7d0260fdf79",
+		Topic:   "avatar.process.v1",
+		Key:     "avatar-id",
+		Payload: []byte(`{"avatar_id":"avatar-id"}`),
+		Headers: map[string]string{
+			"traceparent": "00-11111111111111111111111111111111-2222222222222222-01",
+			"x-custom":    "preserved",
+		},
+		Status:    outbox.StatusPending,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := insertOutboxEvent(context.Background(), db, event); err != nil {
+		t.Fatalf("insertOutboxEvent returned error: %v", err)
+	}
+
+	events, err := NewOutboxRepository(db).ListPendingOutboxEvents(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("ListPendingOutboxEvents returned error: %v", err)
+	}
+	if len(events) != 1 || events[0].Headers["traceparent"] != event.Headers["traceparent"] || events[0].Headers["x-custom"] != "preserved" {
+		t.Fatalf("outbox headers = %#v", events)
+	}
 }
 
 // openIntegrationDB открывает подключение к PostgreSQL для integration suite

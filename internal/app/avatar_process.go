@@ -20,17 +20,20 @@ const (
 	maxProcessAttempts    = 4
 )
 
+// AvatarMetadataStore описывает доступ обработчика к метаданным аватара
 type AvatarMetadataStore interface {
 	GetAvatarIncludingDeleted(ctx context.Context, id string) (avatar.Avatar, error)
 	MarkAvatarReady(ctx context.Context, id string, width int, height int, thumb100Key string, thumb300Key string, updatedAt time.Time) error
 	UpdateAvatarStatus(ctx context.Context, id string, status avatar.Status, updatedAt time.Time) error
 }
 
+// AvatarObjectStore описывает чтение и запись объектов аватара
 type AvatarObjectStore interface {
 	Get(ctx context.Context, key string) (io.ReadCloser, storages3.ObjectMetadata, error)
 	Put(ctx context.Context, key string, reader io.Reader, size int64, contentType string) error
 }
 
+// AvatarProcessService создаёт миниатюры и управляет повторными попытками обработки
 type AvatarProcessService struct {
 	avatars  AvatarMetadataStore
 	objects  AvatarObjectStore
@@ -38,17 +41,25 @@ type AvatarProcessService struct {
 	now      func() time.Time
 }
 
+// AvatarProcessMessage содержит данные сообщения обработки аватара
 type AvatarProcessMessage struct {
-	AvatarID          string `json:"avatar_id"`
-	UserID            string `json:"user_id"`
+	// AvatarID содержит идентификатор аватара
+	AvatarID string `json:"avatar_id"`
+	// UserID содержит идентификатор владельца аватара
+	UserID string `json:"user_id"`
+	// OriginalObjectKey содержит ключ оригинала в объектном хранилище
 	OriginalObjectKey string `json:"original_object_key"`
+	// Thumb100ObjectKey содержит ключ миниатюры размером 100 на 100 пикселей
 	Thumb100ObjectKey string `json:"thumb_100_object_key,omitempty"`
+	// Thumb300ObjectKey содержит ключ миниатюры размером 300 на 300 пикселей
 	Thumb300ObjectKey string `json:"thumb_300_object_key,omitempty"`
-	ContentType       string `json:"content_type,omitempty"`
-	Attempt           int    `json:"attempt"`
+	// ContentType содержит MIME-тип изображения
+	ContentType string `json:"content_type,omitempty"`
+	// Attempt содержит номер попытки обработки
+	Attempt int `json:"attempt"`
 }
 
-// NewAvatarProcessService создает service обработки avatar.process сообщений
+// NewAvatarProcessService создаёт сервис обработки сообщений из темы avatar.process
 func NewAvatarProcessService(avatars AvatarMetadataStore, objects AvatarObjectStore, producer EventPublisher) *AvatarProcessService {
 	return &AvatarProcessService{
 		avatars:  avatars,
@@ -58,7 +69,7 @@ func NewAvatarProcessService(avatars AvatarMetadataStore, objects AvatarObjectSt
 	}
 }
 
-// HandleProcessMessage обрабатывает Kafka payload avatar.process
+// HandleProcessMessage обрабатывает тело сообщения Kafka из темы avatar.process
 func (s *AvatarProcessService) HandleProcessMessage(ctx context.Context, payload []byte) error {
 	var message AvatarProcessMessage
 	if err := json.Unmarshal(payload, &message); err != nil {
@@ -95,7 +106,7 @@ func (s *AvatarProcessService) HandleProcessMessage(ctx context.Context, payload
 	return nil
 }
 
-// processAvatar создает thumbnails и обновляет avatar metadata
+// processAvatar создаёт миниатюры и обновляет метаданные аватара
 func (s *AvatarProcessService) processAvatar(ctx context.Context, message AvatarProcessMessage) error {
 	if s.avatars == nil || s.objects == nil || s.producer == nil {
 		return retryableProcessError{err: fmt.Errorf("avatar process service is not configured")}
@@ -150,7 +161,7 @@ func (s *AvatarProcessService) processAvatar(ctx context.Context, message Avatar
 	return nil
 }
 
-// publishRetry публикует сообщение в следующий retry topic
+// publishRetry публикует сообщение в следующую тему повторной обработки
 func (s *AvatarProcessService) publishRetry(ctx context.Context, message AvatarProcessMessage, cause error) error {
 	next := message
 	next.Attempt++
@@ -160,25 +171,25 @@ func (s *AvatarProcessService) publishRetry(ctx context.Context, message AvatarP
 	}
 
 	topic := processRetryTopic(message.Attempt)
-	if err := s.producer.Publish(ctx, topic, message.AvatarID, payload); err != nil {
+	if err := s.producer.Publish(ctx, topic, message.AvatarID, payload, nil); err != nil {
 		return fmt.Errorf("publish avatar retry after %v: %w", cause, err)
 	}
 	return nil
 }
 
-// publishDeadLetter публикует сообщение в dead-letter topic
+// publishDeadLetter публикует сообщение в тему недоставленных сообщений
 func (s *AvatarProcessService) publishDeadLetter(ctx context.Context, message AvatarProcessMessage, cause error) error {
 	payload, err := json.Marshal(message)
 	if err != nil {
 		return err
 	}
-	if err := s.producer.Publish(ctx, queuekafka.TopicAvatarProcessDeadLetter, message.AvatarID, payload); err != nil {
+	if err := s.producer.Publish(ctx, queuekafka.TopicAvatarProcessDeadLetter, message.AvatarID, payload, nil); err != nil {
 		return fmt.Errorf("publish avatar dead-letter after %v: %w", cause, err)
 	}
 	return nil
 }
 
-// processRetryTopic возвращает retry topic для текущей попытки
+// processRetryTopic возвращает тему повторной обработки для текущей попытки
 func processRetryTopic(attempt int) string {
 	switch attempt {
 	case 1:
@@ -194,7 +205,7 @@ type retryableProcessError struct {
 	err error
 }
 
-// Error возвращает текст retryable ошибки
+// Error возвращает текст временной ошибки
 func (e retryableProcessError) Error() string {
 	return e.err.Error()
 }
@@ -203,7 +214,7 @@ type permanentProcessError struct {
 	err error
 }
 
-// Error возвращает текст permanent ошибки
+// Error возвращает текст постоянной ошибки
 func (e permanentProcessError) Error() string {
 	return e.err.Error()
 }

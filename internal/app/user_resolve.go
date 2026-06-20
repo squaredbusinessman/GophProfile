@@ -8,23 +8,30 @@ import (
 	"github.com/squaredbusinessman/GophProfile/internal/domain/user"
 )
 
+// UserEmailResolver описывает получение или создание пользователя по электронной почте
 type UserEmailResolver interface {
 	FindOrCreateUserByEmail(ctx context.Context, email string, now time.Time) (user.User, error)
 }
 
+// UserResolveService сопоставляет внешний адрес электронной почты с пользователем
 type UserResolveService struct {
 	users UserEmailResolver
 	now   func() time.Time
 }
 
+// UserResolveResult содержит сведения о найденном или созданном пользователе
 type UserResolveResult struct {
-	ID        string
-	Email     string
+	// ID содержит идентификатор пользователя
+	ID string
+	// Email содержит нормализованный адрес электронной почты
+	Email string
+	// CreatedAt содержит время создания пользователя
 	CreatedAt time.Time
+	// UpdatedAt содержит время последнего изменения пользователя
 	UpdatedAt time.Time
 }
 
-// NewUserResolveService создает service сопоставления email с внутренним user_id
+// NewUserResolveService создаёт сервис сопоставления электронной почты с внутренним идентификатором
 func NewUserResolveService(users UserEmailResolver) *UserResolveService {
 	return &UserResolveService{
 		users: users,
@@ -32,7 +39,7 @@ func NewUserResolveService(users UserEmailResolver) *UserResolveService {
 	}
 }
 
-// ResolveUserByEmail возвращает существующего пользователя или создает нового по email
+// ResolveUserByEmail возвращает существующего пользователя или создаёт нового по электронной почте
 func (s *UserResolveService) ResolveUserByEmail(ctx context.Context, email string) (UserResolveResult, error) {
 	if s.users == nil {
 		return UserResolveResult{}, fmt.Errorf("user resolver is not configured")

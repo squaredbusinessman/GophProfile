@@ -1,3 +1,4 @@
+// Package imageproc декодирует изображения и создаёт миниатюры
 package imageproc
 
 import (
@@ -8,33 +9,48 @@ import (
 	"image/png"
 	"io"
 
+	// Регистрируем декодер JPEG для image.Decode
 	_ "image/jpeg"
 	_ "image/png"
 
+	// Регистрируем декодер WebP для image.Decode
 	_ "golang.org/x/image/webp"
 )
 
+// ThumbnailSize задаёт имя и размеры миниатюры
 type ThumbnailSize struct {
-	Name   string
-	Width  int
+	// Name содержит стабильное имя размера
+	Name string
+	// Width содержит ширину в пикселях
+	Width int
+	// Height содержит высоту в пикселях
 	Height int
 }
 
+// DefaultThumbnailSizes содержит стандартные размеры миниатюр аватара
 var DefaultThumbnailSizes = []ThumbnailSize{
 	{Name: "100x100", Width: 100, Height: 100},
 	{Name: "300x300", Width: 300, Height: 300},
 }
 
+// DecodedImage содержит декодированное изображение и его размеры
 type DecodedImage struct {
-	Image  image.Image
-	Width  int
+	// Image содержит декодированное изображение
+	Image image.Image
+	// Width содержит ширину в пикселях
+	Width int
+	// Height содержит высоту в пикселях
 	Height int
 }
 
+// Thumbnail содержит готовую миниатюру и её метаданные
 type Thumbnail struct {
-	Size        ThumbnailSize
+	// Size содержит целевой размер миниатюры
+	Size ThumbnailSize
+	// ContentType содержит MIME-тип результата
 	ContentType string
-	Data        []byte
+	// Data содержит закодированное изображение
+	Data []byte
 }
 
 // Decode читает изображение и возвращает размеры оригинала
@@ -52,7 +68,7 @@ func Decode(reader io.Reader) (DecodedImage, error) {
 	}, nil
 }
 
-// BuildThumbnails создает PNG thumbnails заданных размеров
+// BuildThumbnails создаёт миниатюры PNG заданных размеров
 func BuildThumbnails(img image.Image, sizes []ThumbnailSize) ([]Thumbnail, error) {
 	thumbnails := make([]Thumbnail, 0, len(sizes))
 	for _, size := range sizes {
@@ -103,7 +119,7 @@ func resizeCover(src image.Image, width int, height int) image.Image {
 	return dst
 }
 
-// normalizeColor приводит цвет к RGBA для стабильного PNG output
+// normalizeColor приводит цвет к RGBA для стабильного результата PNG
 func normalizeColor(value color.Color) color.Color {
 	r, g, b, a := value.RGBA()
 	return color.RGBA{

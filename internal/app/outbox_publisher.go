@@ -8,19 +8,21 @@ import (
 	"github.com/squaredbusinessman/GophProfile/internal/domain/outbox"
 )
 
+// OutboxEventStore описывает чтение и обновление событий outbox
 type OutboxEventStore interface {
 	ListPendingOutboxEvents(ctx context.Context, limit int) ([]outbox.Event, error)
 	MarkOutboxPublished(ctx context.Context, id string, publishedAt time.Time) error
 	MarkOutboxPublishAttemptFailed(ctx context.Context, id string, publishErr error, updatedAt time.Time) error
 }
 
+// OutboxPublisherService повторно публикует ожидающие события outbox
 type OutboxPublisherService struct {
 	store     OutboxEventStore
 	publisher EventPublisher
 	now       func() time.Time
 }
 
-// NewOutboxPublisherService создает service повторной публикации outbox событий
+// NewOutboxPublisherService создаёт сервис повторной публикации событий outbox
 func NewOutboxPublisherService(store OutboxEventStore, publisher EventPublisher) *OutboxPublisherService {
 	return &OutboxPublisherService{
 		store:     store,
@@ -29,7 +31,7 @@ func NewOutboxPublisherService(store OutboxEventStore, publisher EventPublisher)
 	}
 }
 
-// PublishPending публикует pending outbox события и обновляет их состояние
+// PublishPending публикует ожидающие события outbox и обновляет их состояние
 func (s *OutboxPublisherService) PublishPending(ctx context.Context, limit int) (int, error) {
 	if s.store == nil || s.publisher == nil {
 		return 0, fmt.Errorf("outbox publisher service is not configured")
@@ -42,7 +44,7 @@ func (s *OutboxPublisherService) PublishPending(ctx context.Context, limit int) 
 
 	published := 0
 	for _, event := range events {
-		if err := s.publisher.Publish(ctx, event.Topic, event.Key, event.Payload); err != nil {
+		if err := s.publisher.Publish(ctx, event.Topic, event.Key, event.Payload, event.Headers); err != nil {
 			LoggerFromContext(ctx).Warn().
 				Str("event_id", event.ID).
 				Str("topic", event.Topic).

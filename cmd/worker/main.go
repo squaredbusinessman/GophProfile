@@ -1,3 +1,4 @@
+// Package main запускает фоновый обработчик приложения
 package main
 
 import (

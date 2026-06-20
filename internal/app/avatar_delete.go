@@ -1,3 +1,4 @@
+// Package app содержит прикладные сценарии сервера и фонового обработчика
 package app
 
 import (
@@ -13,28 +14,34 @@ import (
 	queuekafka "github.com/squaredbusinessman/GophProfile/internal/queue/kafka"
 )
 
+// ErrAvatarForbidden сообщает о попытке удалить аватар другого пользователя
 var ErrAvatarForbidden = errors.New("avatar belongs to another user")
 
+// AvatarDeleteRepository описывает чтение аватаров для операции удаления
 type AvatarDeleteRepository interface {
 	GetAvatarIncludingDeleted(ctx context.Context, id string) (avatar.Avatar, error)
 	ListAvatarsByUser(ctx context.Context, userID string, limit int, offset int) ([]avatar.Avatar, error)
 }
 
+// AvatarDeleteOutboxStore описывает атомарное удаление аватара и создание события outbox
 type AvatarDeleteOutboxStore interface {
 	SoftDeleteAvatarWithOutbox(ctx context.Context, id string, userID string, deletedAt time.Time, event outbox.Event) error
 	MarkOutboxPublished(ctx context.Context, id string, publishedAt time.Time) error
 	MarkOutboxPublishAttemptFailed(ctx context.Context, id string, publishErr error, updatedAt time.Time) error
 }
 
+// AvatarDeleteWorkerRepository описывает доступ обработчика удаления к данным аватара
 type AvatarDeleteWorkerRepository interface {
 	GetAvatarIncludingDeleted(ctx context.Context, id string) (avatar.Avatar, error)
 	MarkAvatarDeleted(ctx context.Context, id string, updatedAt time.Time) error
 }
 
+// AvatarDeleteObjectStore описывает удаление объектов аватара из хранилища
 type AvatarDeleteObjectStore interface {
 	Delete(ctx context.Context, key string) error
 }
 
+// AvatarDeleteService выполняет логическое удаление аватара через outbox
 type AvatarDeleteService struct {
 	avatars  AvatarDeleteRepository
 	outbox   AvatarDeleteOutboxStore
@@ -42,18 +49,22 @@ type AvatarDeleteService struct {
 	now      func() time.Time
 }
 
+// AvatarDeleteWorkerService удаляет объекты аватара и завершает его удаление
 type AvatarDeleteWorkerService struct {
 	avatars AvatarDeleteWorkerRepository
 	objects AvatarDeleteObjectStore
 	now     func() time.Time
 }
 
+// AvatarDeleteEvent содержит данные события удаления аватара
 type AvatarDeleteEvent struct {
+	// AvatarID содержит идентификатор аватара
 	AvatarID string `json:"avatar_id"`
-	UserID   string `json:"user_id"`
+	// UserID содержит идентификатор владельца аватара
+	UserID string `json:"user_id"`
 }
 
-// NewAvatarDeleteService создает service удаления avatar через outbox
+// NewAvatarDeleteService создаёт сервис удаления аватара через outbox
 func NewAvatarDeleteService(avatars AvatarDeleteRepository, outbox AvatarDeleteOutboxStore, producer EventPublisher) *AvatarDeleteService {
 	return &AvatarDeleteService{
 		avatars:  avatars,
@@ -63,7 +74,7 @@ func NewAvatarDeleteService(avatars AvatarDeleteRepository, outbox AvatarDeleteO
 	}
 }
 
-// NewAvatarDeleteWorkerService создает worker service удаления S3 objects
+// NewAvatarDeleteWorkerService создаёт сервис фонового удаления объектов из S3
 func NewAvatarDeleteWorkerService(avatars AvatarDeleteWorkerRepository, objects AvatarDeleteObjectStore) *AvatarDeleteWorkerService {
 	return &AvatarDeleteWorkerService{
 		avatars: avatars,
@@ -72,7 +83,7 @@ func NewAvatarDeleteWorkerService(avatars AvatarDeleteWorkerRepository, objects 
 	}
 }
 
-// DeleteAvatarByID мягко удаляет avatar по id если requester является владельцем
+// DeleteAvatarByID логически удаляет аватар по идентификатору при совпадении владельца
 func (s *AvatarDeleteService) DeleteAvatarByID(ctx context.Context, avatarID string, requesterUserID string) error {
 	if s.avatars == nil || s.outbox == nil || s.producer == nil {
 		return fmt.Errorf("avatar delete service is not configured")
@@ -89,7 +100,7 @@ func (s *AvatarDeleteService) DeleteAvatarByID(ctx context.Context, avatarID str
 	return s.deleteAvatar(ctx, item, requesterUserID)
 }
 
-// DeleteLatestAvatarByUserID мягко удаляет последнюю активную avatar пользователя
+// DeleteLatestAvatarByUserID логически удаляет последний активный аватар пользователя
 func (s *AvatarDeleteService) DeleteLatestAvatarByUserID(ctx context.Context, targetUserID string, requesterUserID string) error {
 	if s.avatars == nil || s.outbox == nil || s.producer == nil {
 		return fmt.Errorf("avatar delete service is not configured")
@@ -109,7 +120,7 @@ func (s *AvatarDeleteService) DeleteLatestAvatarByUserID(ctx context.Context, ta
 	return s.deleteAvatar(ctx, items[0], requesterUserID)
 }
 
-// HandleDeleteMessage обрабатывает Kafka payload avatar.delete
+// HandleDeleteMessage обрабатывает тело сообщения Kafka из темы avatar.delete
 func (s *AvatarDeleteWorkerService) HandleDeleteMessage(ctx context.Context, payload []byte) error {
 	var message AvatarDeleteEvent
 	if err := json.Unmarshal(payload, &message); err != nil {
@@ -145,7 +156,7 @@ func (s *AvatarDeleteWorkerService) HandleDeleteMessage(ctx context.Context, pay
 	return nil
 }
 
-// deleteAvatar выполняет owner check и создает delete outbox событие
+// deleteAvatar проверяет владельца и создаёт событие удаления в outbox
 func (s *AvatarDeleteService) deleteAvatar(ctx context.Context, item avatar.Avatar, requesterUserID string) error {
 	if item.UserID != requesterUserID {
 		return ErrAvatarForbidden
@@ -168,6 +179,7 @@ func (s *AvatarDeleteService) deleteAvatar(ctx context.Context, item avatar.Avat
 		Topic:     queuekafka.TopicAvatarDelete,
 		Key:       item.ID,
 		Payload:   eventPayload,
+		Headers:   queuekafka.InjectTraceContext(ctx, nil),
 		Status:    outbox.StatusPending,
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -183,9 +195,9 @@ func (s *AvatarDeleteService) deleteAvatar(ctx context.Context, item avatar.Avat
 	return nil
 }
 
-// publishOutboxEvent пытается быстро опубликовать outbox событие после commit
+// publishOutboxEvent пытается опубликовать событие outbox сразу после фиксации транзакции
 func (s *AvatarDeleteService) publishOutboxEvent(ctx context.Context, event outbox.Event) {
-	if err := s.producer.Publish(ctx, event.Topic, event.Key, event.Payload); err != nil {
+	if err := s.producer.Publish(ctx, event.Topic, event.Key, event.Payload, event.Headers); err != nil {
 		_ = s.outbox.MarkOutboxPublishAttemptFailed(ctx, event.ID, err, s.now().UTC())
 		return
 	}

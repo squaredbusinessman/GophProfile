@@ -147,7 +147,7 @@ type fakeUserLookup struct {
 	err  error
 }
 
-// GetUser возвращает fake пользователя по UUID
+// GetUser возвращает тестового пользователя по UUID
 func (f *fakeUserLookup) GetUser(ctx context.Context, id string) (user.User, error) {
 	if f.err != nil {
 		return user.User{}, f.err
@@ -164,7 +164,7 @@ type fakeAvatarOutboxStore struct {
 	markFailedAttemptCalled bool
 }
 
-// CreateAvatarWithOutbox запоминает fake-запись avatar и outbox событие
+// CreateAvatarWithOutbox запоминает тестовые записи аватара и события outbox
 func (f *fakeAvatarOutboxStore) CreateAvatarWithOutbox(ctx context.Context, item avatar.Avatar, event outbox.Event) error {
 	f.createCalled = true
 	f.created = item
@@ -172,13 +172,13 @@ func (f *fakeAvatarOutboxStore) CreateAvatarWithOutbox(ctx context.Context, item
 	return f.createErr
 }
 
-// MarkOutboxPublished запоминает fake-успешную публикацию outbox
+// MarkOutboxPublished запоминает успешную публикацию тестового события outbox
 func (f *fakeAvatarOutboxStore) MarkOutboxPublished(ctx context.Context, id string, publishedAt time.Time) error {
 	f.markPublishedCalled = true
 	return nil
 }
 
-// MarkOutboxPublishAttemptFailed запоминает fake-ошибку публикации outbox
+// MarkOutboxPublishAttemptFailed запоминает ошибку публикации тестового события outbox
 func (f *fakeAvatarOutboxStore) MarkOutboxPublishAttemptFailed(ctx context.Context, id string, publishErr error, updatedAt time.Time) error {
 	f.markFailedAttemptCalled = true
 	return nil
@@ -189,7 +189,7 @@ type fakeObjectStore struct {
 	putErr    error
 }
 
-// Put запоминает fake-загрузку object storage
+// Put запоминает тестовую загрузку в объектное хранилище
 func (f *fakeObjectStore) Put(ctx context.Context, key string, reader io.Reader, size int64, contentType string) error {
 	f.putCalled = true
 	return f.putErr
@@ -202,14 +202,19 @@ type fakeEventPublisher struct {
 	topic         string
 	key           string
 	payload       []byte
+	headers       map[string]string
 }
 
-// Publish запоминает fake-публикацию события
-func (f *fakeEventPublisher) Publish(ctx context.Context, topic string, key string, payload []byte) error {
+// Publish запоминает тестовую публикацию события
+func (f *fakeEventPublisher) Publish(ctx context.Context, topic string, key string, payload []byte, headers map[string]string) error {
 	f.publishCalled = true
 	f.publishCalls++
 	f.topic = topic
 	f.key = key
 	f.payload = append([]byte(nil), payload...)
+	f.headers = make(map[string]string, len(headers))
+	for name, value := range headers {
+		f.headers[name] = value
+	}
 	return f.publishErr
 }

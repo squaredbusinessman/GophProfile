@@ -1,3 +1,4 @@
+// Package postgres предоставляет репозитории приложения для PostgreSQL
 package postgres
 
 import (
@@ -10,6 +11,7 @@ import (
 	"github.com/squaredbusinessman/GophProfile/internal/domain/avatar"
 )
 
+// AvatarRepository сохраняет и читает аватары в PostgreSQL
 type AvatarRepository struct {
 	db *sql.DB
 }
@@ -18,19 +20,19 @@ type sqlExecutor interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }
 
-// NewAvatarRepository создает repository для работы с avatar в PostgreSQL
+// NewAvatarRepository создаёт репозиторий аватаров в PostgreSQL
 func NewAvatarRepository(db *sql.DB) *AvatarRepository {
 	return &AvatarRepository{db: db}
 }
 
-// CreateAvatar сохраняет новую avatar со статусом processing
+// CreateAvatar сохраняет новый аватар в состоянии обработки
 func (r *AvatarRepository) CreateAvatar(ctx context.Context, item avatar.Avatar) (err error) {
 	ctx, span := startRepositorySpan(ctx, "INSERT", "avatars")
 	defer func() { finishRepositorySpan(span, err) }()
 	return insertAvatar(ctx, r.db, item)
 }
 
-// insertAvatar сохраняет avatar через указанный SQL executor
+// insertAvatar сохраняет аватар через указанный исполнитель SQL
 func insertAvatar(ctx context.Context, executor sqlExecutor, item avatar.Avatar) error {
 	if err := avatar.ValidateStatus(item.Status); err != nil {
 		return err
@@ -77,7 +79,7 @@ func insertAvatar(ctx context.Context, executor sqlExecutor, item avatar.Avatar)
 	return nil
 }
 
-// GetAvatar возвращает активную avatar по id
+// GetAvatar возвращает активный аватар по идентификатору
 func (r *AvatarRepository) GetAvatar(ctx context.Context, id string) (item avatar.Avatar, err error) {
 	ctx, span := startRepositorySpan(ctx, "SELECT", "avatars")
 	defer func() { finishRepositorySpan(span, err) }()

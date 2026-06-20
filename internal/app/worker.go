@@ -12,10 +12,10 @@ import (
 	"go.opentelemetry.io/otel/codes"
 )
 
-// workerInstrumentationName задаёт имя области инструментирования worker operations
+// workerInstrumentationName задаёт имя области инструментирования операций фонового обработчика
 const workerInstrumentationName = "github.com/squaredbusinessman/GophProfile/internal/app/worker"
 
-// RunWorker запускает worker и периодически публикует pending outbox события
+// RunWorker запускает фоновый обработчик и периодически публикует ожидающие события outbox
 func RunWorker(ctx context.Context, cfg config.Config, logger zerolog.Logger, outboxPublisher *OutboxPublisherService, processConsumer ProcessMessageConsumer, avatarProcessor *AvatarProcessService, avatarDeleter *AvatarDeleteWorkerService) error {
 	ctx = ContextWithLogger(ctx, logger)
 	LoggerFromContext(ctx).Info().
@@ -49,11 +49,12 @@ func RunWorker(ctx context.Context, cfg config.Config, logger zerolog.Logger, ou
 	}
 }
 
+// ProcessMessageConsumer описывает получение сообщений из именованных тем Kafka
 type ProcessMessageConsumer interface {
 	Consume(ctx context.Context, topics []string, handler func(context.Context, queuekafka.Message) error) error
 }
 
-// consumeAvatarMessages читает avatar topics и запускает нужный обработчик
+// consumeAvatarMessages читает темы аватаров и запускает нужный обработчик
 func consumeAvatarMessages(ctx context.Context, consumer ProcessMessageConsumer, processor *AvatarProcessService, deleter *AvatarDeleteWorkerService) error {
 	topics := make([]string, 0, 5)
 	if processor != nil {
@@ -88,7 +89,7 @@ func consumeAvatarMessages(ctx context.Context, consumer ProcessMessageConsumer,
 	})
 }
 
-// shutdownWorker выполняет graceful shutdown worker
+// shutdownWorker корректно завершает фоновый обработчик в пределах тайм-аута
 func shutdownWorker(ctx context.Context, cfg config.Config, consumerErrCh <-chan error) error {
 	LoggerFromContext(ctx).Info().Dur("timeout", cfg.Worker.ShutdownTimeout).Msg("worker shutting down")
 
@@ -107,7 +108,7 @@ func shutdownWorker(ctx context.Context, cfg config.Config, consumerErrCh <-chan
 	}
 }
 
-// publishPendingOutbox публикует pending outbox события если publisher настроен
+// publishPendingOutbox публикует ожидающие события outbox при наличии издателя
 func publishPendingOutbox(ctx context.Context, cfg config.Config, outboxPublisher *OutboxPublisherService) {
 	if outboxPublisher == nil {
 		return
