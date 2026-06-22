@@ -43,17 +43,19 @@ type AvatarDeleteObjectStore interface {
 
 // AvatarDeleteService выполняет логическое удаление аватара через outbox
 type AvatarDeleteService struct {
-	avatars  AvatarDeleteRepository
-	outbox   AvatarDeleteOutboxStore
-	producer EventPublisher
-	now      func() time.Time
+	avatars   AvatarDeleteRepository
+	outbox    AvatarDeleteOutboxStore
+	producer  EventPublisher
+	now       func() time.Time
+	telemetry businessTelemetry
 }
 
 // AvatarDeleteWorkerService удаляет объекты аватара и завершает его удаление
 type AvatarDeleteWorkerService struct {
-	avatars AvatarDeleteWorkerRepository
-	objects AvatarDeleteObjectStore
-	now     func() time.Time
+	avatars   AvatarDeleteWorkerRepository
+	objects   AvatarDeleteObjectStore
+	now       func() time.Time
+	telemetry businessTelemetry
 }
 
 // AvatarDeleteEvent содержит данные события удаления аватара
@@ -67,24 +69,30 @@ type AvatarDeleteEvent struct {
 // NewAvatarDeleteService создаёт сервис удаления аватара через outbox
 func NewAvatarDeleteService(avatars AvatarDeleteRepository, outbox AvatarDeleteOutboxStore, producer EventPublisher) *AvatarDeleteService {
 	return &AvatarDeleteService{
-		avatars:  avatars,
-		outbox:   outbox,
-		producer: producer,
-		now:      time.Now,
+		avatars:   avatars,
+		outbox:    outbox,
+		producer:  producer,
+		now:       time.Now,
+		telemetry: newBusinessTelemetry(),
 	}
 }
 
 // NewAvatarDeleteWorkerService создаёт сервис фонового удаления объектов из S3
 func NewAvatarDeleteWorkerService(avatars AvatarDeleteWorkerRepository, objects AvatarDeleteObjectStore) *AvatarDeleteWorkerService {
 	return &AvatarDeleteWorkerService{
-		avatars: avatars,
-		objects: objects,
-		now:     time.Now,
+		avatars:   avatars,
+		objects:   objects,
+		now:       time.Now,
+		telemetry: newBusinessTelemetry(),
 	}
 }
 
 // DeleteAvatarByID логически удаляет аватар по идентификатору при совпадении владельца
 func (s *AvatarDeleteService) DeleteAvatarByID(ctx context.Context, avatarID string, requesterUserID string) error {
+	startedAt := time.Now()
+	result := deleteResultError
+	defer func() { s.telemetry.recordDelete(ctx, startedAt, deletePhaseRequest, result) }()
+
 	if s.avatars == nil || s.outbox == nil || s.producer == nil {
 		return fmt.Errorf("avatar delete service is not configured")
 	}
@@ -92,20 +100,27 @@ func (s *AvatarDeleteService) DeleteAvatarByID(ctx context.Context, avatarID str
 	item, err := s.avatars.GetAvatarIncludingDeleted(ctx, avatarID)
 	if err != nil {
 		if errors.Is(err, avatar.ErrNotFound) {
+			result = deleteResultRejected
 			return ErrAvatarNotFound
 		}
 		return fmt.Errorf("get avatar for delete: %w", err)
 	}
 
-	return s.deleteAvatar(ctx, item, requesterUserID)
+	result, err = s.deleteAvatar(ctx, item, requesterUserID)
+	return err
 }
 
 // DeleteLatestAvatarByUserID логически удаляет последний активный аватар пользователя
 func (s *AvatarDeleteService) DeleteLatestAvatarByUserID(ctx context.Context, targetUserID string, requesterUserID string) error {
+	startedAt := time.Now()
+	result := deleteResultError
+	defer func() { s.telemetry.recordDelete(ctx, startedAt, deletePhaseRequest, result) }()
+
 	if s.avatars == nil || s.outbox == nil || s.producer == nil {
 		return fmt.Errorf("avatar delete service is not configured")
 	}
 	if targetUserID != requesterUserID {
+		result = deleteResultRejected
 		return ErrAvatarForbidden
 	}
 
@@ -114,14 +129,20 @@ func (s *AvatarDeleteService) DeleteLatestAvatarByUserID(ctx context.Context, ta
 		return fmt.Errorf("list avatars for delete: %w", err)
 	}
 	if len(items) == 0 {
+		result = deleteResultIdempotentSkip
 		return nil
 	}
 
-	return s.deleteAvatar(ctx, items[0], requesterUserID)
+	result, err = s.deleteAvatar(ctx, items[0], requesterUserID)
+	return err
 }
 
 // HandleDeleteMessage обрабатывает тело сообщения Kafka из темы avatar.delete
 func (s *AvatarDeleteWorkerService) HandleDeleteMessage(ctx context.Context, payload []byte) error {
+	startedAt := time.Now()
+	result := deleteResultError
+	defer func() { s.telemetry.recordDelete(ctx, startedAt, deletePhaseExecute, result) }()
+
 	var message AvatarDeleteEvent
 	if err := json.Unmarshal(payload, &message); err != nil {
 		return fmt.Errorf("decode avatar delete message: %w", err)
@@ -136,11 +157,13 @@ func (s *AvatarDeleteWorkerService) HandleDeleteMessage(ctx context.Context, pay
 	item, err := s.avatars.GetAvatarIncludingDeleted(ctx, message.AvatarID)
 	if err != nil {
 		if errors.Is(err, avatar.ErrNotFound) {
+			result = deleteResultIdempotentSkip
 			return nil
 		}
 		return fmt.Errorf("get avatar for object delete: %w", err)
 	}
 	if item.Status == avatar.StatusDeleted {
+		result = deleteResultIdempotentSkip
 		return nil
 	}
 
@@ -153,16 +176,17 @@ func (s *AvatarDeleteWorkerService) HandleDeleteMessage(ctx context.Context, pay
 	if err := s.avatars.MarkAvatarDeleted(ctx, item.ID, s.now().UTC()); err != nil {
 		return fmt.Errorf("mark avatar deleted: %w", err)
 	}
+	result = deleteResultCompleted
 	return nil
 }
 
 // deleteAvatar проверяет владельца и создаёт событие удаления в outbox
-func (s *AvatarDeleteService) deleteAvatar(ctx context.Context, item avatar.Avatar, requesterUserID string) error {
+func (s *AvatarDeleteService) deleteAvatar(ctx context.Context, item avatar.Avatar, requesterUserID string) (string, error) {
 	if item.UserID != requesterUserID {
-		return ErrAvatarForbidden
+		return deleteResultRejected, ErrAvatarForbidden
 	}
 	if item.DeletedAt != nil || item.Status == avatar.StatusDeleting || item.Status == avatar.StatusDeleted {
-		return nil
+		return deleteResultIdempotentSkip, nil
 	}
 
 	now := s.now().UTC()
@@ -171,7 +195,7 @@ func (s *AvatarDeleteService) deleteAvatar(ctx context.Context, item avatar.Avat
 		UserID:   item.UserID,
 	})
 	if err != nil {
-		return fmt.Errorf("marshal avatar delete event: %w", err)
+		return deleteResultError, fmt.Errorf("marshal avatar delete event: %w", err)
 	}
 
 	event := outbox.Event{
@@ -186,21 +210,26 @@ func (s *AvatarDeleteService) deleteAvatar(ctx context.Context, item avatar.Avat
 	}
 	if err := s.outbox.SoftDeleteAvatarWithOutbox(ctx, item.ID, item.UserID, now, event); err != nil {
 		if errors.Is(err, avatar.ErrNotFound) {
-			return nil
+			return deleteResultIdempotentSkip, nil
 		}
-		return fmt.Errorf("soft delete avatar with outbox: %w", err)
+		return deleteResultError, fmt.Errorf("soft delete avatar with outbox: %w", err)
 	}
 
 	s.publishOutboxEvent(ctx, event)
-	return nil
+	return deleteResultAccepted, nil
 }
 
 // publishOutboxEvent пытается опубликовать событие outbox сразу после фиксации транзакции
 func (s *AvatarDeleteService) publishOutboxEvent(ctx context.Context, event outbox.Event) {
 	if err := s.producer.Publish(ctx, event.Topic, event.Key, event.Payload, event.Headers); err != nil {
+		s.telemetry.recordOutboxPublish(ctx, outboxPublishModeImmediate, outboxPublishResultError)
 		_ = s.outbox.MarkOutboxPublishAttemptFailed(ctx, event.ID, err, s.now().UTC())
 		return
 	}
 
-	_ = s.outbox.MarkOutboxPublished(ctx, event.ID, s.now().UTC())
+	if err := s.outbox.MarkOutboxPublished(ctx, event.ID, s.now().UTC()); err != nil {
+		s.telemetry.recordOutboxPublish(ctx, outboxPublishModeImmediate, outboxPublishResultError)
+		return
+	}
+	s.telemetry.recordOutboxPublish(ctx, outboxPublishModeImmediate, outboxPublishResultSuccess)
 }

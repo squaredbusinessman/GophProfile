@@ -49,6 +49,7 @@ type AvatarUploadService struct {
 	objects      ObjectStore
 	publisher    EventPublisher
 	now          func() time.Time
+	telemetry    businessTelemetry
 }
 
 // AvatarUploadRequest содержит данные запроса на загрузку аватара
@@ -119,11 +120,16 @@ func NewAvatarUploadService(users UserLookup, avatarOutbox AvatarOutboxStore, ob
 		objects:      objects,
 		publisher:    publisher,
 		now:          time.Now,
+		telemetry:    newBusinessTelemetry(),
 	}
 }
 
 // UploadAvatar сохраняет оригинал в S3 и атомарно создаёт аватар с событием outbox
 func (s *AvatarUploadService) UploadAvatar(ctx context.Context, req AvatarUploadRequest) (AvatarUploadResult, error) {
+	startedAt := time.Now()
+	result := uploadResultError
+	defer func() { s.telemetry.recordUpload(ctx, startedAt, result) }()
+
 	if s.users == nil || s.avatarOutbox == nil || s.objects == nil || s.publisher == nil {
 		return AvatarUploadResult{}, fmt.Errorf("avatar upload service is not configured")
 	}
@@ -197,6 +203,7 @@ func (s *AvatarUploadService) UploadAvatar(ctx context.Context, req AvatarUpload
 	}
 
 	s.publishOutboxEvent(ctx, outboxEvent)
+	result = uploadResultAccepted
 
 	return AvatarUploadResult{
 		ID:                avatarID,
@@ -215,11 +222,16 @@ func (s *AvatarUploadService) UploadAvatar(ctx context.Context, req AvatarUpload
 // publishOutboxEvent пытается опубликовать событие outbox сразу после фиксации транзакции
 func (s *AvatarUploadService) publishOutboxEvent(ctx context.Context, event outbox.Event) {
 	if err := s.publisher.Publish(ctx, event.Topic, event.Key, event.Payload, event.Headers); err != nil {
+		s.telemetry.recordOutboxPublish(ctx, outboxPublishModeImmediate, outboxPublishResultError)
 		_ = s.avatarOutbox.MarkOutboxPublishAttemptFailed(ctx, event.ID, err, s.now().UTC())
 		return
 	}
 
-	_ = s.avatarOutbox.MarkOutboxPublished(ctx, event.ID, s.now().UTC())
+	if err := s.avatarOutbox.MarkOutboxPublished(ctx, event.ID, s.now().UTC()); err != nil {
+		s.telemetry.recordOutboxPublish(ctx, outboxPublishModeImmediate, outboxPublishResultError)
+		return
+	}
+	s.telemetry.recordOutboxPublish(ctx, outboxPublishModeImmediate, outboxPublishResultSuccess)
 }
 
 // intPtr возвращает указатель на положительный int или nil

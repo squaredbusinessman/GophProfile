@@ -214,6 +214,22 @@ consumer context. Payload и message key не записываются в logs, 
 metric labels. Kafka operation count, client duration и process duration
 доступны в Prometheus и на Kafka-панелях Grafana.
 
+Business metrics используют только фиксированные labels `result`, `phase` и
+`mode`. Принятая загрузка учитывается в `app.avatar.upload.count` с результатом
+`accepted` после атомарной записи avatar и outbox. Ошибка immediate publish не
+превращает её в upload error и отдельно попадает в `app.outbox.publish.count`.
+Результаты обработки `ready`, `failed`, `retry_scheduled`, `idempotent_skip` и
+`error` экспортируются через `app.avatar.processing.count`; повторная обработка
+не увеличивает upload counter. Планирование и фактическое выполнение удаления
+разделены label `phase` в `app.avatar.delete.count`.
+
+Operational gauges `app.outbox.pending.count`, `app.outbox.oldest.age`,
+`app.avatar.count` и `app.avatar.original.storage` читаются из PostgreSQL при
+scrape. Поэтому backlog, статусы аватаров и размер оригиналов восстанавливаются
+после перезапуска процесса и не зависят от локального состояния счётчиков.
+Dashboard показывает accepted uploads, ready/failed processing, completed
+deletes, outbox backlog, возраст старейшего события и объём оригиналов.
+
 Для повторного запуска без пересборки образов:
 
 ```bash

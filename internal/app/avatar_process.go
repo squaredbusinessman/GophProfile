@@ -35,10 +35,11 @@ type AvatarObjectStore interface {
 
 // AvatarProcessService создаёт миниатюры и управляет повторными попытками обработки
 type AvatarProcessService struct {
-	avatars  AvatarMetadataStore
-	objects  AvatarObjectStore
-	producer EventPublisher
-	now      func() time.Time
+	avatars   AvatarMetadataStore
+	objects   AvatarObjectStore
+	producer  EventPublisher
+	now       func() time.Time
+	telemetry businessTelemetry
 }
 
 // AvatarProcessMessage содержит данные сообщения обработки аватара
@@ -62,15 +63,20 @@ type AvatarProcessMessage struct {
 // NewAvatarProcessService создаёт сервис обработки сообщений из темы avatar.process
 func NewAvatarProcessService(avatars AvatarMetadataStore, objects AvatarObjectStore, producer EventPublisher) *AvatarProcessService {
 	return &AvatarProcessService{
-		avatars:  avatars,
-		objects:  objects,
-		producer: producer,
-		now:      time.Now,
+		avatars:   avatars,
+		objects:   objects,
+		producer:  producer,
+		now:       time.Now,
+		telemetry: newBusinessTelemetry(),
 	}
 }
 
 // HandleProcessMessage обрабатывает тело сообщения Kafka из темы avatar.process
 func (s *AvatarProcessService) HandleProcessMessage(ctx context.Context, payload []byte) error {
+	startedAt := time.Now()
+	result := processResultError
+	defer func() { s.telemetry.recordProcessing(ctx, startedAt, result) }()
+
 	var message AvatarProcessMessage
 	if err := json.Unmarshal(payload, &message); err != nil {
 		return fmt.Errorf("decode avatar process message: %w", err)
@@ -79,14 +85,16 @@ func (s *AvatarProcessService) HandleProcessMessage(ctx context.Context, payload
 		message.Attempt = initialProcessAttempt
 	}
 
-	err := s.processAvatar(ctx, message)
+	processResult, err := s.processAvatar(ctx, message)
 	if err == nil {
+		result = processResult
 		return nil
 	}
 	if isPermanentProcessError(err) {
 		if updateErr := s.avatars.UpdateAvatarStatus(ctx, message.AvatarID, avatar.StatusFailed, s.now().UTC()); updateErr != nil {
 			return fmt.Errorf("mark avatar failed after permanent error: %w", updateErr)
 		}
+		result = processResultFailed
 		return nil
 	}
 
@@ -97,35 +105,37 @@ func (s *AvatarProcessService) HandleProcessMessage(ctx context.Context, payload
 		if updateErr := s.avatars.UpdateAvatarStatus(ctx, message.AvatarID, avatar.StatusFailed, s.now().UTC()); updateErr != nil {
 			return fmt.Errorf("mark avatar failed after dead-letter: %w", updateErr)
 		}
+		result = processResultFailed
 		return nil
 	}
 
 	if publishErr := s.publishRetry(ctx, message, err); publishErr != nil {
 		return publishErr
 	}
+	result = processResultRetryScheduled
 	return nil
 }
 
 // processAvatar создаёт миниатюры и обновляет метаданные аватара
-func (s *AvatarProcessService) processAvatar(ctx context.Context, message AvatarProcessMessage) error {
+func (s *AvatarProcessService) processAvatar(ctx context.Context, message AvatarProcessMessage) (string, error) {
 	if s.avatars == nil || s.objects == nil || s.producer == nil {
-		return retryableProcessError{err: fmt.Errorf("avatar process service is not configured")}
+		return "", retryableProcessError{err: fmt.Errorf("avatar process service is not configured")}
 	}
 
 	item, err := s.avatars.GetAvatarIncludingDeleted(ctx, message.AvatarID)
 	if err != nil {
-		return retryableProcessError{err: err}
+		return "", retryableProcessError{err: err}
 	}
 	if item.Status == avatar.StatusReady {
-		return nil
+		return processResultIdempotentSkip, nil
 	}
 	if item.DeletedAt != nil {
-		return nil
+		return processResultIdempotentSkip, nil
 	}
 
 	body, _, err := s.objects.Get(ctx, item.OriginalObjectKey)
 	if err != nil {
-		return retryableProcessError{err: err}
+		return "", retryableProcessError{err: err}
 	}
 	defer func() {
 		_ = body.Close()
@@ -133,12 +143,12 @@ func (s *AvatarProcessService) processAvatar(ctx context.Context, message Avatar
 
 	decoded, err := imageproc.Decode(body)
 	if err != nil {
-		return permanentProcessError{err: err}
+		return "", permanentProcessError{err: err}
 	}
 
 	thumbnails, err := imageproc.BuildThumbnails(decoded.Image, imageproc.DefaultThumbnailSizes)
 	if err != nil {
-		return permanentProcessError{err: err}
+		return "", permanentProcessError{err: err}
 	}
 
 	thumb100Key := storages3.Thumb100ObjectKey(item.UserID, item.ID)
@@ -150,15 +160,15 @@ func (s *AvatarProcessService) processAvatar(ctx context.Context, message Avatar
 			key = thumb300Key
 		}
 		if err := s.objects.Put(ctx, key, bytes.NewReader(thumbnail.Data), int64(len(thumbnail.Data)), thumbnail.ContentType); err != nil {
-			return retryableProcessError{err: err}
+			return "", retryableProcessError{err: err}
 		}
 	}
 
 	if err := s.avatars.MarkAvatarReady(ctx, item.ID, decoded.Width, decoded.Height, thumb100Key, thumb300Key, s.now().UTC()); err != nil {
-		return retryableProcessError{err: err}
+		return "", retryableProcessError{err: err}
 	}
 
-	return nil
+	return processResultReady, nil
 }
 
 // publishRetry публикует сообщение в следующую тему повторной обработки

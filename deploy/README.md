@@ -89,6 +89,11 @@ Kafka-панели показывают send/process/commit rate, error ratio и
 Outbox сохраняет W3C carrier в `headers` JSONB, поэтому публикация после restart
 продолжает исходный trace. Payload и message key не экспортируются в telemetry.
 
+Business-панели показывают accepted uploads, ready/failed processing и
+completed deletes. Outbox backlog, возраст старейшего pending event, количество
+avatar по status и original storage bytes вычисляются запросами к PostgreSQL при
+каждом scrape, поэтому gauges корректно восстанавливаются после restart.
+
 Jaeger работает в all-in-one режиме с in-memory storage. Это осознанная
 настройка локальной разработки: при перезапуске Jaeger трейсы удаляются. Loki,
 Prometheus и Grafana используют именованные Docker volumes.

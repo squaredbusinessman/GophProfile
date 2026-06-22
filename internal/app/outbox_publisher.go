@@ -20,6 +20,7 @@ type OutboxPublisherService struct {
 	store     OutboxEventStore
 	publisher EventPublisher
 	now       func() time.Time
+	telemetry businessTelemetry
 }
 
 // NewOutboxPublisherService создаёт сервис повторной публикации событий outbox
@@ -28,6 +29,7 @@ func NewOutboxPublisherService(store OutboxEventStore, publisher EventPublisher)
 		store:     store,
 		publisher: publisher,
 		now:       time.Now,
+		telemetry: newBusinessTelemetry(),
 	}
 }
 
@@ -45,6 +47,7 @@ func (s *OutboxPublisherService) PublishPending(ctx context.Context, limit int) 
 	published := 0
 	for _, event := range events {
 		if err := s.publisher.Publish(ctx, event.Topic, event.Key, event.Payload, event.Headers); err != nil {
+			s.telemetry.recordOutboxPublish(ctx, outboxPublishModeBackground, outboxPublishResultError)
 			LoggerFromContext(ctx).Warn().
 				Str("event_id", event.ID).
 				Str("topic", event.Topic).
@@ -54,8 +57,10 @@ func (s *OutboxPublisherService) PublishPending(ctx context.Context, limit int) 
 			continue
 		}
 		if err := s.store.MarkOutboxPublished(ctx, event.ID, s.now().UTC()); err != nil {
+			s.telemetry.recordOutboxPublish(ctx, outboxPublishModeBackground, outboxPublishResultError)
 			return published, err
 		}
+		s.telemetry.recordOutboxPublish(ctx, outboxPublishModeBackground, outboxPublishResultSuccess)
 		published++
 	}
 

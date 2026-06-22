@@ -12,6 +12,24 @@ import (
 	"github.com/squaredbusinessman/GophProfile/internal/domain/outbox"
 )
 
+// TestReadOutboxOperationalStatsReturnsPersistentBacklog проверяет агрегаты outbox из БД
+func TestReadOutboxOperationalStatsReturnsPersistentBacklog(t *testing.T) {
+	db, mock := newMockDB(t)
+	repo := NewOutboxRepository(db)
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT\n\t\t\tCOUNT(*),")).
+		WithArgs(string(outbox.StatusPending)).
+		WillReturnRows(sqlmock.NewRows([]string{"count", "oldest_age"}).AddRow(int64(5), 37.5))
+
+	pendingCount, oldestAgeSeconds, err := repo.ReadOutboxOperationalStats(context.Background())
+	if err != nil {
+		t.Fatalf("ReadOutboxOperationalStats() error = %v", err)
+	}
+	if pendingCount != 5 || oldestAgeSeconds != 37.5 {
+		t.Fatalf("outbox stats = count %d age %f", pendingCount, oldestAgeSeconds)
+	}
+	assertExpectations(t, mock)
+}
+
 // TestCreateAvatarWithOutboxWritesBothRecordsInTransaction проверяет атомарную запись avatar и outbox
 func TestCreateAvatarWithOutboxWritesBothRecordsInTransaction(t *testing.T) {
 	recorder := installPostgresSpanRecorder(t)

@@ -551,6 +551,150 @@
       ],
       "title": "Kafka p95 Latency",
       "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "ops"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 41},
+      "id": 13,
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(app_avatar_upload_count_total{result=\"accepted\"}[$__rate_interval]))",
+          "legendFormat": "accepted uploads",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Accepted Uploads",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "ops"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 41},
+      "id": 14,
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (result) (rate(app_avatar_processing_count_total{result=~\"ready|failed\"}[$__rate_interval]))",
+          "legendFormat": "{{result}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Ready / Failed Processing",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "ops"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 41},
+      "id": 15,
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(app_avatar_delete_count_total{phase=\"execute\",result=\"completed\"}[$__rate_interval]))",
+          "legendFormat": "completed deletes",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Completed Deletes",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "short", "min": 0}, "overrides": []},
+      "gridPos": {"h": 7, "w": 6, "x": 0, "y": 49},
+      "id": 16,
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "values": false}},
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "max(app_outbox_pending_count)",
+          "legendFormat": "pending",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Outbox Backlog",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "s", "min": 0}, "overrides": []},
+      "gridPos": {"h": 7, "w": 6, "x": 6, "y": 49},
+      "id": 17,
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "values": false}},
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "max(app_outbox_oldest_age_seconds)",
+          "legendFormat": "oldest pending",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Oldest Outbox Event",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "short", "min": 0}, "overrides": []},
+      "gridPos": {"h": 7, "w": 12, "x": 12, "y": 49},
+      "id": 18,
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "max by (status) (app_avatar_count)",
+          "legendFormat": "{{status}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Avatars by Status",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "bytes", "min": 0}, "overrides": []},
+      "gridPos": {"h": 7, "w": 8, "x": 0, "y": 56},
+      "id": 19,
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "values": false}},
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "max(app_avatar_original_storage_bytes)",
+          "legendFormat": "original storage",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Original Storage",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "ops"}, "overrides": []},
+      "gridPos": {"h": 7, "w": 16, "x": 8, "y": 56},
+      "id": 20,
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (mode, result) (rate(app_outbox_publish_count_total[$__rate_interval]))",
+          "legendFormat": "{{mode}} {{result}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Outbox Publish Outcomes",
+      "type": "timeseries"
     }
   ],
   "refresh": "5s",
@@ -559,7 +703,9 @@
     "gophprofile",
     "red",
     "s3",
-    "kafka"
+    "kafka",
+    "business",
+    "outbox"
   ],
   "templating": {
     "list": []

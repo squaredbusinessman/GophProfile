@@ -87,6 +87,9 @@ func main() {
 	userRepo := postgres.NewUserRepository(db)
 	outboxRepo := postgres.NewOutboxRepository(db)
 	avatarRepo := postgres.NewAvatarRepository(db)
+	if err := telemetry.RegisterBusinessMetrics(outboxRepo, avatarRepo); err != nil {
+		logger.Fatal().Str("error_type", app.ErrorType(err)).Msg("register business metrics")
+	}
 	userResolveService := app.NewUserResolveService(userRepo)
 	avatarUploadService := app.NewAvatarUploadService(userRepo, outboxRepo, s3Client, kafkaClient)
 	avatarReadService := app.NewAvatarReadServiceWithUsers(userRepo, avatarRepo, s3Client)

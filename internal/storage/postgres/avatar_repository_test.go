@@ -12,6 +12,28 @@ import (
 	"github.com/squaredbusinessman/GophProfile/internal/domain/avatar"
 )
 
+// TestReadAvatarOperationalStatsReturnsCountsAndStorage проверяет агрегаты аватаров из БД
+func TestReadAvatarOperationalStatsReturnsCountsAndStorage(t *testing.T) {
+	db, mock := newMockDB(t)
+	repo := NewAvatarRepository(db)
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT status, COUNT(*)")).
+		WillReturnRows(sqlmock.NewRows([]string{"status", "count"}).
+			AddRow(string(avatar.StatusReady), int64(3)).
+			AddRow(string(avatar.StatusFailed), int64(1)))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COALESCE(SUM(size_bytes), 0)")).
+		WithArgs(string(avatar.StatusDeleted)).
+		WillReturnRows(sqlmock.NewRows([]string{"size"}).AddRow(int64(4096)))
+
+	countByStatus, originalStorageBytes, err := repo.ReadAvatarOperationalStats(context.Background())
+	if err != nil {
+		t.Fatalf("ReadAvatarOperationalStats() error = %v", err)
+	}
+	if countByStatus[avatar.StatusReady] != 3 || countByStatus[avatar.StatusFailed] != 1 || originalStorageBytes != 4096 {
+		t.Fatalf("avatar stats = counts %#v storage %d", countByStatus, originalStorageBytes)
+	}
+	assertExpectations(t, mock)
+}
+
 // TestCreateAvatarInsertsAllFields проверяет SQL-вставку avatar
 func TestCreateAvatarInsertsAllFields(t *testing.T) {
 	db, mock := newMockDB(t)

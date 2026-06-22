@@ -76,13 +76,17 @@ func NewTelemetry(ctx context.Context, cfg config.Config) (*Telemetry, error) {
 			sdktrace.WithSampler(traceSampler(cfg.Observability)),
 			sdktrace.WithBatcher(exporter),
 		)
-		mp = metric.NewMeterProvider(metric.WithResource(res), metric.WithReader(promExporter))
+		mp = metric.NewMeterProvider(
+			metric.WithResource(res),
+			metric.WithReader(promExporter),
+			metric.WithView(businessMetricViews()...),
+		)
 	} else {
 		tp = sdktrace.NewTracerProvider(
 			sdktrace.WithResource(res),
 			sdktrace.WithSampler(sdktrace.NeverSample()),
 		)
-		mp = metric.NewMeterProvider(metric.WithResource(res))
+		mp = metric.NewMeterProvider(metric.WithResource(res), metric.WithView(businessMetricViews()...))
 	}
 
 	otel.SetTracerProvider(tp)

@@ -16,6 +16,48 @@ type AvatarRepository struct {
 	db *sql.DB
 }
 
+// ReadAvatarOperationalStats возвращает количество аватаров по состояниям и размер оригиналов
+func (r *AvatarRepository) ReadAvatarOperationalStats(ctx context.Context) (countByStatus map[avatar.Status]int64, originalStorageBytes int64, err error) {
+	ctx, span := startRepositorySpan(ctx, "SELECT", "avatars")
+	defer func() { finishRepositorySpan(span, err) }()
+
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT status, COUNT(*)
+		FROM avatars
+		GROUP BY status
+	`)
+	if err != nil {
+		return nil, 0, fmt.Errorf("read avatar count by status: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	countByStatus = make(map[avatar.Status]int64)
+	for rows.Next() {
+		var status avatar.Status
+		var count int64
+		if err := rows.Scan(&status, &count); err != nil {
+			return nil, 0, fmt.Errorf("scan avatar count by status: %w", err)
+		}
+		if err := avatar.ValidateStatus(status); err != nil {
+			return nil, 0, err
+		}
+		countByStatus[status] = count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("iterate avatar count by status: %w", err)
+	}
+
+	err = r.db.QueryRowContext(ctx, `
+		SELECT COALESCE(SUM(size_bytes), 0)
+		FROM avatars
+		WHERE status <> $1
+	`, string(avatar.StatusDeleted)).Scan(&originalStorageBytes)
+	if err != nil {
+		return nil, 0, fmt.Errorf("read original storage bytes: %w", err)
+	}
+	return countByStatus, originalStorageBytes, nil
+}
+
 type sqlExecutor interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }

@@ -17,6 +17,24 @@ type OutboxRepository struct {
 	db *sql.DB
 }
 
+// ReadOutboxOperationalStats возвращает размер очереди и возраст старейшего события outbox
+func (r *OutboxRepository) ReadOutboxOperationalStats(ctx context.Context) (pendingCount int64, oldestAgeSeconds float64, err error) {
+	ctx, span := startRepositorySpan(ctx, "SELECT", "outbox_events")
+	defer func() { finishRepositorySpan(span, err) }()
+
+	err = r.db.QueryRowContext(ctx, `
+		SELECT
+			COUNT(*),
+			COALESCE(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - MIN(created_at))), 0)
+		FROM outbox_events
+		WHERE status = $1
+	`, string(outbox.StatusPending)).Scan(&pendingCount, &oldestAgeSeconds)
+	if err != nil {
+		return 0, 0, fmt.Errorf("read outbox operational stats: %w", err)
+	}
+	return pendingCount, oldestAgeSeconds, nil
+}
+
 // NewOutboxRepository создаёт репозиторий событий outbox
 func NewOutboxRepository(db *sql.DB) *OutboxRepository {
 	return &OutboxRepository{db: db}
