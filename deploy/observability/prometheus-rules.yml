@@ -1,0 +1,18 @@
+groups:
+  - name: gophprofile-operational
+    rules:
+      - alert: GophProfileTargetDown
+        expr: up{job=~"gophprofile-server|gophprofile-worker"} == 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: GophProfile target is unavailable
+
+      - alert: GophProfileOutboxBacklog
+        expr: max(app_outbox_pending_count) > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Outbox backlog exceeds 100 events

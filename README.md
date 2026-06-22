@@ -124,8 +124,6 @@ docker compose -f deploy/vault/docker-compose.yml up -d
 Сервисы:
 
 - server API: `http://localhost:8080`
-- server metrics: `http://localhost:9464/metrics`
-- worker metrics: `http://localhost:9465/metrics`
 - frontend-build: `http://localhost:3000/web/`
 - PostgreSQL: `localhost:5432`
 - Kafka: `kafka:9092` внутри compose-сети
@@ -135,6 +133,7 @@ docker compose -f deploy/vault/docker-compose.yml up -d
 - Grafana: `http://localhost:3001` (`admin` / `admin`)
 - Jaeger: `http://localhost:16686`
 - Loki API: `http://localhost:3100`
+- Alertmanager: `http://localhost:9093`
 - Alloy UI: `http://localhost:12345`
 
 В локальном compose `server` и `worker` автоматически создают MinIO bucket из
@@ -167,11 +166,17 @@ docker compose -f deploy/vault/docker-compose.yml up -d
 - `LOG_FORMAT` (по умолчанию `json`; `console` разрешён только при `APP_ENV=local`)
 
 Metrics HTTP server запускается и корректно останавливается даже в no-op режиме.
-Локальный compose включает Prometheus, Grafana, Loki, Alloy и Jaeger. Для
-`server` и `worker` telemetry включена, а service names заданы раздельно.
+Базовый `deploy/docker-compose.yml` содержит приложение и его хранилища, а
+`deploy/docker-compose.observability.yml` добавляет Prometheus, Jaeger, Loki,
+Alloy, Grafana, Kafka exporter, cAdvisor и Alertmanager. `scripts/local-up.sh`
+объединяет оба файла одной командой. Для `server` и `worker` overlay включает
+telemetry и задаёт разные service names.
 Alloy читает только stdout контейнеров `server` и `worker` через Docker API и
-отправляет записи в Loki. Grafana автоматически получает data sources и
-dashboard `GophProfile Observability`.
+отправляет записи в Loki. JSON pipeline использует только labels `service`,
+`environment`, `level` и `container`; идентификаторы трассировки, запросов и
+сущностей остаются полями записи. Grafana автоматически получает data sources
+Prometheus, Loki, Jaeger и Alertmanager, а также dashboard
+`GophProfile Observability`.
 
 HTTP API инструментирован через `otelhttp`. Для API-запросов экспортируются
 server spans и RED-метрики `http.server.request.count`,
@@ -229,6 +234,13 @@ scrape. Поэтому backlog, статусы аватаров и размер 
 после перезапуска процесса и не зависят от локального состояния счётчиков.
 Dashboard показывает accepted uploads, ready/failed processing, completed
 deletes, outbox backlog, возраст старейшего события и объём оригиналов.
+
+Prometheus также забирает consumer lag из Kafka exporter и container resource
+metrics из cAdvisor. Loki хранит локальные данные семь дней. Alloy и cAdvisor
+монтируют `/var/run/docker.sock` только для чтения; даже read-only socket даёт
+широкую видимость Docker daemon, поэтому эта схема предназначена исключительно
+для локальной разработки. В production Kubernetes следует использовать
+discovery и сбор pod logs через Kubernetes API.
 
 Для повторного запуска без пересборки образов:
 

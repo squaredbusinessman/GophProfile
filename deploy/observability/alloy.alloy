@@ -13,7 +13,7 @@ discovery.relabel "application_logs" {
 
   rule {
     source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
-    target_label  = "service_name"
+    target_label  = "service"
   }
 
   rule {
@@ -27,8 +27,30 @@ discovery.relabel "application_logs" {
 loki.source.docker "application" {
   host          = "unix:///var/run/docker.sock"
   targets       = discovery.relabel.application_logs.output
-  forward_to    = [loki.write.local.receiver]
+  forward_to    = [loki.process.application.receiver]
   refresh_interval = "5s"
+}
+
+loki.process "application" {
+  forward_to = [loki.write.local.receiver]
+
+  stage.json {
+    expressions = {
+      environment = "env",
+      level       = "level",
+    }
+  }
+
+  stage.labels {
+    values = {
+      environment = "",
+      level       = "",
+    }
+  }
+
+  stage.label_drop {
+    values = ["detected_level", "service_name"]
+  }
 }
 
 loki.write "local" {

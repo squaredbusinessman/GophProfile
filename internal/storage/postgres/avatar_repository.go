@@ -18,9 +18,6 @@ type AvatarRepository struct {
 
 // ReadAvatarOperationalStats возвращает количество аватаров по состояниям и размер оригиналов
 func (r *AvatarRepository) ReadAvatarOperationalStats(ctx context.Context) (countByStatus map[avatar.Status]int64, originalStorageBytes int64, err error) {
-	ctx, span := startRepositorySpan(ctx, "SELECT", "avatars")
-	defer func() { finishRepositorySpan(span, err) }()
-
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT status, COUNT(*)
 		FROM avatars

@@ -9,11 +9,17 @@
 - `migrate`
 - `kafka`
 - `minio`
+
+Observability overlay `docker-compose.observability.yml` добавляет:
+
 - `prometheus`
 - `grafana`
 - `loki`
 - `alloy`
 - `jaeger`
+- `kafka-exporter`
+- `cadvisor`
+- `alertmanager`
 
 ## Запуск
 
@@ -21,9 +27,10 @@
 ./scripts/local-up.sh
 ```
 
-Скрипт собирает образы, поднимает compose в фоне, дожидается готовности
-`postgres`, `kafka`, `server`, `worker`, `frontend-build`, проверяет
-`/health`, frontend и наличие MinIO bucket.
+Скрипт объединяет base и observability overlay, собирает образы, поднимает стек
+в фоне и дожидается healthchecks всех сервисов. Дополнительно он проверяет `UP`
+targets server/worker в Prometheus, readiness Loki и Alloy, JSON logs обоих
+процессов в Loki, HTTP API, frontend и наличие MinIO bucket.
 
 Повторный запуск без пересборки образов:
 
@@ -41,13 +48,13 @@
 
 ```bash
 cd deploy
-docker compose up --build
+docker compose -f docker-compose.yml -f docker-compose.observability.yml up --build
 ```
 
-Остановка с очисткой локальных volumes:
+Остановка с сохранением локальных volumes:
 
 ```bash
-docker compose -f deploy/docker-compose.yml down -v
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.observability.yml down
 ```
 
 ## Адреса
@@ -59,24 +66,26 @@ docker compose -f deploy/docker-compose.yml down -v
 - Kafka: `localhost:9092`
 - MinIO API: `http://localhost:9000`
 - MinIO Console: `http://localhost:9001`
-- Server metrics: `http://localhost:9464/metrics`
-- Worker metrics: `http://localhost:9465/metrics`
 - Prometheus: `http://localhost:9090`
 - Grafana: `http://localhost:3001` (`admin` / `admin`)
 - Jaeger: `http://localhost:16686`
 - Loki API: `http://localhost:3100`
+- Alertmanager: `http://localhost:9093`
 - Alloy UI: `http://localhost:12345`
 
 ## Observability
 
 Prometheus забирает метрики напрямую с отдельных metrics endpoints `server` и
-`worker`. Jaeger принимает OTLP по gRPC на `jaeger:4317`. Alloy обнаруживает
+`worker` внутри compose network, а также собирает Kafka consumer lag через
+Kafka exporter и container resource metrics через cAdvisor. Jaeger принимает
+OTLP по gRPC на `jaeger:4317` и HTTP на `jaeger:4318`. Alloy обнаруживает
 контейнеры через Docker API, выбирает только application logs от `server` и
-`worker` и отправляет их в Loki.
+`worker`, разбирает JSON и отправляет записи в Loki.
 
-Grafana provisioning автоматически создает data sources Prometheus, Loki и
-Jaeger, а также dashboard `GophProfile Observability`. Связи Loki -> Jaeger и
-Jaeger -> Loki используют поля `trace_id`, `span_id` и `service_name`.
+Grafana provisioning автоматически создает data sources Prometheus, Loki,
+Jaeger и Alertmanager, а также dashboard `GophProfile Observability`. Связи
+Loki -> Jaeger и Jaeger -> Loki используют поля `trace_id` и `span_id` без
+превращения их в Loki labels.
 
 Dashboard объединяет HTTP RED и состояние PostgreSQL connection pool. Метрики
 pool собираются приложениями из `sql.DBStats()` и включают open, used, idle,
@@ -98,9 +107,11 @@ Jaeger работает в all-in-one режиме с in-memory storage. Это 
 настройка локальной разработки: при перезапуске Jaeger трейсы удаляются. Loki,
 Prometheus и Grafana используют именованные Docker volumes.
 
-Alloy получает read-only доступ к Docker socket. Для production вместо этого
-нужен инфраструктурный log collector с минимально необходимыми правами и
-внешние persistent storage для telemetry backends.
+Alloy использует labels только `service`, `environment`, `level` и `container`.
+Alloy и cAdvisor получают read-only доступ к Docker socket, но такой mount всё
+равно даёт широкую видимость Docker daemon. Для production Kubernetes нужен
+сбор pod logs через Kubernetes API с минимально необходимыми правами и внешние
+persistent storage для telemetry backends.
 
 ## Env
 

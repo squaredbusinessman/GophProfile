@@ -28,6 +28,15 @@ schema_config:
 limits_config:
   allow_structured_metadata: true
   volume_enabled: true
+  retention_period: 168h
+  discover_log_levels: false
+  discover_service_name: []
+
+compactor:
+  working_directory: /loki/compactor
+  compaction_interval: 10m
+  retention_enabled: true
+  delete_request_store: filesystem
 
 analytics:
   reporting_enabled: false

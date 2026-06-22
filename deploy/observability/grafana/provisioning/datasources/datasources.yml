@@ -44,4 +44,13 @@ datasources:
         filterBySpanID: false
         tags:
           - key: service.name
-            value: service_name
+            value: service
+
+  - name: Alertmanager
+    uid: alertmanager
+    type: alertmanager
+    access: proxy
+    url: http://alertmanager:9093
+    editable: false
+    jsonData:
+      implementation: prometheus
