@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/squaredbusinessman/GophProfile/internal/config"
 	"go.opentelemetry.io/otel"
@@ -57,6 +58,7 @@ func NewTelemetry(ctx context.Context, cfg config.Config) (*Telemetry, error) {
 		attribute.String("deployment.environment", cfg.Env),
 	)
 	registry := prometheus.NewRegistry()
+	registry.MustRegister(collectors.NewGoCollector())
 	handler := promhttp.HandlerFor(registry, promhttp.HandlerOpts{})
 
 	var tp *sdktrace.TracerProvider

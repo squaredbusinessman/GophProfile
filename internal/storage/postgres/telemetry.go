@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/squaredbusinessman/GophProfile/internal/domain/avatar"
 	"github.com/squaredbusinessman/GophProfile/internal/domain/outbox"
@@ -11,6 +12,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
 	semconv "go.opentelemetry.io/otel/semconv/v1.40.0"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -18,8 +20,41 @@ import (
 // postgresInstrumentationName задаёт имя области инструментирования PostgreSQL repositories
 const postgresInstrumentationName = "github.com/squaredbusinessman/GophProfile/internal/storage/postgres"
 
-// startRepositorySpan создаёт безопасный span на границе repository method
-func startRepositorySpan(ctx context.Context, operation string, collection string) (context.Context, trace.Span) {
+var databaseResultAttribute = attribute.Key("db.operation.result")
+
+// postgresTelemetry содержит метрики операций репозиториев PostgreSQL
+type postgresTelemetry struct {
+	operations metric.Int64Counter
+	duration   metric.Float64Histogram
+}
+
+// repositoryOperation связывает span с измерением одной операции репозитория
+type repositoryOperation struct {
+	trace.Span
+	startedAt  time.Time
+	operation  string
+	collection string
+	telemetry  postgresTelemetry
+}
+
+// newPostgresTelemetry создаёт инструменты PostgreSQL для текущего провайдера метрик
+func newPostgresTelemetry() postgresTelemetry {
+	meter := otel.Meter(postgresInstrumentationName)
+	operations, _ := meter.Int64Counter(
+		"db.client.operation.count",
+		metric.WithDescription("Количество завершённых операций PostgreSQL repository"),
+		metric.WithUnit("{operation}"),
+	)
+	duration, _ := meter.Float64Histogram(
+		"db.client.operation.duration",
+		metric.WithDescription("Продолжительность операций PostgreSQL repository"),
+		metric.WithUnit("s"),
+	)
+	return postgresTelemetry{operations: operations, duration: duration}
+}
+
+// startRepositoryOperation создаёт безопасный span и начинает измерение метода репозитория
+func (t postgresTelemetry) startRepositoryOperation(ctx context.Context, operation string, collection string) (context.Context, *repositoryOperation) {
 	attributes := []attribute.KeyValue{
 		semconv.DBSystemNamePostgreSQL,
 		semconv.DBOperationName(operation),
@@ -32,23 +67,40 @@ func startRepositorySpan(ctx context.Context, operation string, collection strin
 	if collection != "" {
 		name += " " + collection
 	}
-	return otel.Tracer(postgresInstrumentationName).Start(
+	ctx, span := otel.Tracer(postgresInstrumentationName).Start(
 		ctx,
 		name,
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(attributes...),
 	)
+	return ctx, &repositoryOperation{
+		Span: span, startedAt: time.Now(), operation: operation, collection: collection, telemetry: t,
+	}
 }
 
-// finishRepositorySpan завершает span и отмечает неожиданные ошибки
-func finishRepositorySpan(span trace.Span, err error) {
-	defer span.End()
-	if err == nil || isExpectedRepositoryResult(err) {
-		return
+// finishRepositoryOperation завершает span и записывает безопасный результат операции
+func finishRepositoryOperation(operation *repositoryOperation, err error) {
+	defer operation.End()
+	result := "success"
+	if isExpectedRepositoryResult(err) {
+		result = "not_found"
+	} else if err != nil {
+		result = "error"
+		operation.SetStatus(codes.Error, "database operation failed")
+		operation.SetAttributes(attribute.String("error.type", rootErrorType(err)))
 	}
 
-	span.SetStatus(codes.Error, "database operation failed")
-	span.SetAttributes(attribute.String("error.type", rootErrorType(err)))
+	attributes := []attribute.KeyValue{
+		semconv.DBSystemNamePostgreSQL,
+		semconv.DBOperationName(operation.operation),
+		databaseResultAttribute.String(result),
+	}
+	if operation.collection != "" {
+		attributes = append(attributes, semconv.DBCollectionName(operation.collection))
+	}
+	options := metric.WithAttributes(attributes...)
+	operation.telemetry.operations.Add(context.Background(), 1, options)
+	operation.telemetry.duration.Record(context.Background(), time.Since(operation.startedAt).Seconds(), options)
 }
 
 // isExpectedRepositoryResult отличает штатное отсутствие записи от ошибки БД

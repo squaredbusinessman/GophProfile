@@ -84,6 +84,9 @@ func TestMetricsHandlerServesPrometheusFormat(t *testing.T) {
 	if !strings.Contains(recorder.Header().Get("Content-Type"), "text/plain") || !strings.Contains(recorder.Body.String(), "stage_one_requests_total") {
 		t.Fatalf("unexpected Prometheus response: content-type=%q body=%q", recorder.Header().Get("Content-Type"), recorder.Body.String())
 	}
+	if !strings.Contains(recorder.Body.String(), "go_goroutines") {
+		t.Fatalf("Prometheus response does not contain Go runtime collector: body=%q", recorder.Body.String())
+	}
 }
 
 // TestDBPoolMetricsAppearInPrometheus проверяет экспорт состояния database/sql pool

@@ -17,6 +17,7 @@ const (
 
 	processResultReady          = "ready"
 	processResultFailed         = "failed"
+	processResultDeadLetter     = "dead_letter"
 	processResultRetryScheduled = "retry_scheduled"
 	processResultIdempotentSkip = "idempotent_skip"
 	processResultError          = "error"
@@ -45,6 +46,7 @@ var (
 // businessTelemetry содержит низкокардинальные метрики прикладных операций
 type businessTelemetry struct {
 	uploads         metric.Int64Counter
+	uploadBytes     metric.Int64Counter
 	uploadDuration  metric.Float64Histogram
 	processing      metric.Int64Counter
 	processDuration metric.Float64Histogram
@@ -65,6 +67,11 @@ func newBusinessTelemetry() businessTelemetry {
 		"app.avatar.upload.duration",
 		metric.WithDescription("Продолжительность загрузки аватара"),
 		metric.WithUnit("s"),
+	)
+	uploadBytes, _ := meter.Int64Counter(
+		"app.avatar.upload.bytes",
+		metric.WithDescription("Количество байтов принятых оригиналов аватаров"),
+		metric.WithUnit("By"),
 	)
 	processing, _ := meter.Int64Counter(
 		"app.avatar.processing.count",
@@ -93,7 +100,7 @@ func newBusinessTelemetry() businessTelemetry {
 	)
 
 	telemetry := businessTelemetry{
-		uploads: uploads, uploadDuration: uploadDuration,
+		uploads: uploads, uploadBytes: uploadBytes, uploadDuration: uploadDuration,
 		processing: processing, processDuration: processDuration,
 		deletes: deletes, deleteDuration: deleteDuration,
 		outboxPublishes: outboxPublishes,
@@ -107,7 +114,8 @@ func (t businessTelemetry) initialize(ctx context.Context) {
 	for _, result := range []string{uploadResultAccepted, uploadResultError} {
 		t.uploads.Add(ctx, 0, metric.WithAttributes(resultAttribute.String(result)))
 	}
-	for _, result := range []string{processResultReady, processResultFailed, processResultRetryScheduled, processResultIdempotentSkip, processResultError} {
+	t.uploadBytes.Add(ctx, 0)
+	for _, result := range []string{processResultReady, processResultFailed, processResultDeadLetter, processResultRetryScheduled, processResultIdempotentSkip, processResultError} {
 		t.processing.Add(ctx, 0, metric.WithAttributes(resultAttribute.String(result)))
 	}
 	for _, labels := range []struct{ phase, result string }{
@@ -129,9 +137,12 @@ func (t businessTelemetry) initialize(ctx context.Context) {
 }
 
 // recordUpload записывает результат и продолжительность загрузки
-func (t businessTelemetry) recordUpload(ctx context.Context, startedAt time.Time, result string) {
+func (t businessTelemetry) recordUpload(ctx context.Context, startedAt time.Time, result string, acceptedBytes int64) {
 	attrs := metric.WithAttributes(resultAttribute.String(result))
 	t.uploads.Add(ctx, 1, attrs)
+	if result == uploadResultAccepted && acceptedBytes > 0 {
+		t.uploadBytes.Add(ctx, acceptedBytes)
+	}
 	t.uploadDuration.Record(ctx, time.Since(startedAt).Seconds(), attrs)
 }
 

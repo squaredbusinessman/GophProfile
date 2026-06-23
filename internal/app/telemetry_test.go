@@ -39,6 +39,7 @@ func TestUploadMetricsTreatPersistedOutboxAsAccepted(t *testing.T) {
 	exposition := scrapeBusinessMetrics(t, handler)
 	assertMetricValue(t, exposition, `app_avatar_upload_count_total{result="accepted"}`, "1")
 	assertMetricValue(t, exposition, `app_avatar_upload_count_total{result="error"}`, "0")
+	assertMetricValue(t, exposition, `app_avatar_upload_bytes_total`, "4")
 	assertMetricValue(t, exposition, `app_outbox_publish_count_total{mode="immediate",result="error"}`, "1")
 	assertNoSensitiveMetricData(t, exposition)
 }
@@ -60,6 +61,26 @@ func TestProcessingRetryDoesNotIncrementUpload(t *testing.T) {
 	exposition := scrapeBusinessMetrics(t, handler)
 	assertMetricValue(t, exposition, `app_avatar_processing_count_total{result="retry_scheduled"}`, "1")
 	assertMetricValue(t, exposition, `app_avatar_upload_count_total{result="accepted"}`, "0")
+	assertNoSensitiveMetricData(t, exposition)
+}
+
+// TestProcessingDeadLetterHasSeparateMetric проверяет отдельный результат dead-letter
+func TestProcessingDeadLetterHasSeparateMetric(t *testing.T) {
+	handler := installBusinessMetricProvider(t)
+	service := NewAvatarProcessService(
+		&fakeAvatarMetadataStore{item: avatar.Avatar{ID: "dead-letter-avatar", UserID: "user", Status: avatar.StatusProcessing, OriginalObjectKey: "original"}},
+		&fakeAvatarObjectStore{getErr: errors.New("temporary storage error")},
+		&fakeEventPublisher{},
+	)
+
+	err := service.HandleProcessMessage(context.Background(), []byte(`{"avatar_id":"dead-letter-avatar","attempt":4}`))
+	if err != nil {
+		t.Fatalf("HandleProcessMessage() error = %v", err)
+	}
+
+	exposition := scrapeBusinessMetrics(t, handler)
+	assertMetricValue(t, exposition, `app_avatar_processing_count_total{result="dead_letter"}`, "1")
+	assertMetricValue(t, exposition, `app_avatar_processing_count_total{result="failed"}`, "0")
 	assertNoSensitiveMetricData(t, exposition)
 }
 
@@ -161,6 +182,14 @@ func scrapeBusinessMetrics(t *testing.T, handler http.Handler) string {
 func assertMetricValue(t *testing.T, exposition string, series string, value string) {
 	t.Helper()
 	brace := strings.IndexByte(series, '{')
+	if brace == -1 {
+		for _, line := range strings.Split(exposition, "\n") {
+			if strings.HasPrefix(line, series) && strings.HasSuffix(line, " "+value) {
+				return
+			}
+		}
+		t.Fatalf("metric %s = %s is missing:\n%s", series, value, exposition)
+	}
 	metricName := series[:brace]
 	labels := strings.Split(strings.TrimSuffix(series[brace+1:], "}"), ",")
 	for _, line := range strings.Split(exposition, "\n") {

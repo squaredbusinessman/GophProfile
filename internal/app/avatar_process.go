@@ -105,7 +105,7 @@ func (s *AvatarProcessService) HandleProcessMessage(ctx context.Context, payload
 		if updateErr := s.avatars.UpdateAvatarStatus(ctx, message.AvatarID, avatar.StatusFailed, s.now().UTC()); updateErr != nil {
 			return fmt.Errorf("mark avatar failed after dead-letter: %w", updateErr)
 		}
-		result = processResultFailed
+		result = processResultDeadLetter
 		return nil
 	}
 

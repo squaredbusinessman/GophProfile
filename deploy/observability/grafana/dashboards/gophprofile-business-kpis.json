@@ -1,0 +1,501 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "description": "Продуктовые outcomes, фоновые обработки и operational aggregates приложения",
+  "editable": false,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Business upload outcome: immediate publish failure не считается ошибкой upload, если outbox сохранён",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (result) (rate(app_avatar_upload_count_total{job=~\"gophprofile-$service\",instance=~\"$instance\"}[$__rate_interval]) and on(job, instance) target_info{deployment_environment=~\"$environment\"}) or on() vector(0)",
+          "legendFormat": "{{result}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "uploads accepted/error rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Скорость принятых байтов оригиналов, записывается только для accepted upload",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 12,
+        "y": 0
+      },
+      "id": 2,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(app_avatar_upload_bytes_total{job=~\"gophprofile-$service\",instance=~\"$instance\"}[$__rate_interval]) and on(job, instance) target_info{deployment_environment=~\"$environment\"}) or on() vector(0)",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "upload bytes rate",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Результаты worker processing разделены, чтобы dead-letter не терялся внутри failed",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      },
+      "id": 3,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (result) (rate(app_avatar_processing_count_total{job=~\"gophprofile-$service\",instance=~\"$instance\",result=~\"ready|retry_scheduled|failed|dead_letter|idempotent_skip|error\"}[$__rate_interval]) and on(job, instance) target_info{deployment_environment=~\"$environment\"}) or on() vector(0)",
+          "legendFormat": "{{result}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "processing ready/retry/failed/dead-letter rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "P95 обработки изображений по histogram buckets business instrumentation",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 0,
+        "y": 7
+      },
+      "id": 4,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(app_avatar_processing_duration_seconds_bucket{job=~\"gophprofile-$service\",instance=~\"$instance\"}[$__rate_interval]) and on(job, instance) target_info{deployment_environment=~\"$environment\"})) or on() vector(0)",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "processing duration p95",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Gauge восстанавливается collector из PostgreSQL после restart и показывает агрегаты без UUID/email",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 6,
+        "y": 7
+      },
+      "id": 5,
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "max by (status) (app_avatar_count{job=~\"gophprofile-$service\",instance=~\"$instance\"} and on(job, instance) target_info{deployment_environment=~\"$environment\"}) or on() vector(0)",
+          "legendFormat": "{{status}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "avatars by status",
+      "type": "bargauge"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Delete outcome разделён на request и execute phase, idempotent skip виден отдельно",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 12,
+        "y": 7
+      },
+      "id": 6,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (phase, result) (rate(app_avatar_delete_count_total{job=~\"gophprofile-$service\",instance=~\"$instance\"}[$__rate_interval]) and on(job, instance) target_info{deployment_environment=~\"$environment\"}) or on() vector(0)",
+          "legendFormat": "{{phase}} {{result}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "delete rate/errors",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Объём оригиналов из DB aggregate collector, object key не используется как label",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 18,
+        "y": 7
+      },
+      "id": 7,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "max(app_avatar_original_storage_bytes{job=~\"gophprofile-$service\",instance=~\"$instance\"} and on(job, instance) target_info{deployment_environment=~\"$environment\"}) or on() vector(0)",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "original storage bytes",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Backlog outbox: pending count и возраст старейшего pending события показывают задержку фоновой публикации",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 14
+      },
+      "id": 8,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "max(app_outbox_pending_count{job=~\"gophprofile-$service\",instance=~\"$instance\"} and on(job, instance) target_info{deployment_environment=~\"$environment\"}) or on() vector(0)",
+          "legendFormat": "pending count",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(app_outbox_oldest_pending_age_seconds{job=~\"gophprofile-$service\",instance=~\"$instance\"} and on(job, instance) target_info{deployment_environment=~\"$environment\"}) or on() vector(0)",
+          "legendFormat": "oldest age seconds",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "pending outbox and oldest age",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Отдельно видно immediate и background publish, retries не считаются новым upload",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 21
+      },
+      "id": 9,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (mode, result) (rate(app_outbox_publish_count_total{job=~\"gophprofile-$service\",instance=~\"$instance\"}[$__rate_interval]) and on(job, instance) target_info{deployment_environment=~\"$environment\"}) or on() vector(0)",
+          "legendFormat": "{{mode}} {{result}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "outbox publish outcomes",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 41,
+  "tags": [
+    "gophprofile",
+    "provisioned",
+    "observability"
+  ],
+  "templating": {
+    "list": [
+      {
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "definition": "label_values(target_info, deployment_environment)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Environment",
+        "multi": true,
+        "name": "environment",
+        "options": [],
+        "query": "label_values(target_info, deployment_environment)",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "definition": "label_values(up{job=~\"gophprofile-.*\"}, job)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Service",
+        "multi": true,
+        "name": "service",
+        "options": [],
+        "query": "label_values(up{job=~\"gophprofile-.*\"}, job)",
+        "refresh": 1,
+        "regex": "/gophprofile-(.*)/",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "definition": "label_values(up{job=~\"gophprofile-$service\"}, instance)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Instance",
+        "multi": true,
+        "name": "instance",
+        "options": [],
+        "query": "label_values(up{job=~\"gophprofile-$service\"}, instance)",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timezone": "browser",
+  "title": "GophProfile Business KPIs",
+  "uid": "gophprofile-business-kpis",
+  "version": 1,
+  "weekStart": ""
+}

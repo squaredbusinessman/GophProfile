@@ -128,7 +128,8 @@ func NewAvatarUploadService(users UserLookup, avatarOutbox AvatarOutboxStore, ob
 func (s *AvatarUploadService) UploadAvatar(ctx context.Context, req AvatarUploadRequest) (AvatarUploadResult, error) {
 	startedAt := time.Now()
 	result := uploadResultError
-	defer func() { s.telemetry.recordUpload(ctx, startedAt, result) }()
+	var acceptedBytes int64
+	defer func() { s.telemetry.recordUpload(ctx, startedAt, result, acceptedBytes) }()
 
 	if s.users == nil || s.avatarOutbox == nil || s.objects == nil || s.publisher == nil {
 		return AvatarUploadResult{}, fmt.Errorf("avatar upload service is not configured")
@@ -204,6 +205,7 @@ func (s *AvatarUploadService) UploadAvatar(ctx context.Context, req AvatarUpload
 
 	s.publishOutboxEvent(ctx, outboxEvent)
 	result = uploadResultAccepted
+	acceptedBytes = int64(len(body))
 
 	return AvatarUploadResult{
 		ID:                avatarID,
