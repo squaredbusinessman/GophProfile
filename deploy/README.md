@@ -61,7 +61,7 @@ docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.observabili
 
 - Server API: `http://localhost:8080`
 - Healthcheck: `http://localhost:8080/health`
-- Frontend: `http://localhost:3000/web/`
+- Frontend: `http://localhost/web/`
 - PostgreSQL: `localhost:5432`
 - Kafka: `localhost:9092`
 - MinIO API: `http://localhost:9000`
@@ -83,13 +83,14 @@ OTLP по gRPC на `jaeger:4317` и HTTP на `jaeger:4318`. Alloy обнару
 `worker`, разбирает JSON и отправляет записи в Loki.
 
 Grafana provisioning автоматически создает data sources Prometheus, Loki,
-Jaeger и Alertmanager, а также dashboard `GophProfile Observability`. Связи
-Loki -> Jaeger и Jaeger -> Loki используют поля `trace_id` и `span_id` без
-превращения их в Loki labels.
+Jaeger и Alertmanager, а также dashboards `Service Overview`, `Business KPIs`
+и `Dependencies and Resources`. Связи Loki -> Jaeger и Jaeger -> Loki используют
+поля `trace_id` и `span_id` без превращения их в Loki labels.
 
-Dashboard объединяет HTTP RED и состояние PostgreSQL connection pool. Метрики
-pool собираются приложениями из `sql.DBStats()` и включают open, used, idle,
-maximum connections, waits и суммарную продолжительность ожиданий.
+Service Overview показывает доступность, HTTP RED, WARN/ERROR logs и последние
+ошибки со ссылкой на trace. Метрики PostgreSQL pool собираются приложениями из
+`sql.DBStats()` и включают open, used, idle, maximum connections, waits и
+суммарную продолжительность ожиданий.
 
 S3-панели показывают operation rate, error ratio и p95 latency по ограниченным
 labels operation/result. Object key не экспортируется в Prometheus labels.
@@ -102,6 +103,14 @@ Business-панели показывают accepted uploads, ready/failed proces
 completed deletes. Outbox backlog, возраст старейшего pending event, количество
 avatar по status и original storage bytes вычисляются запросами к PostgreSQL при
 каждом scrape, поэтому gauges корректно восстанавливаются после restart.
+
+Prometheus загружает alert rules из `observability/prometheus-rules.yml` и
+отправляет alerts в локальный Alertmanager. В local Alertmanager ничего не
+отправляет наружу, поэтому alerts видны только в UI `http://localhost:9093`.
+Для production receiver есть шаблоны
+`observability/alertmanager.production.env.example` и
+`observability/alertmanager.production.yml.example`; реальные Telegram, Slack
+или email credentials в репозиторий не добавляются.
 
 Jaeger работает в all-in-one режиме с in-memory storage. Это осознанная
 настройка локальной разработки: при перезапуске Jaeger трейсы удаляются. Loki,
@@ -129,7 +138,7 @@ KAFKA_CLIENT_ID=gophprofile-server|gophprofile-worker
 KAFKA_CONSUMER_GROUP=gophprofile-avatar-worker
 HTTP_ADDR=:8080
 DEFAULT_AVATAR_PATH=/app/default_avatar.png
-CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:5173
+CORS_ALLOWED_ORIGINS=http://localhost,http://localhost:3000,http://localhost:5173
 ```
 
 При `APP_ENV=local` приложения `server` и `worker` создают bucket
@@ -140,12 +149,21 @@ CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:5173
 `server` в compose получает локальные security-настройки:
 
 ```text
-CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:5173
+CORS_ALLOWED_ORIGINS=http://localhost,http://localhost:3000,http://localhost:5173
 API_RATE_LIMIT_RPS=20
 API_RATE_LIMIT_BURST=40
 ```
 
 `CORS_ALLOWED_ORIGINS` должен оставаться явным списком origins без wildcard.
+
+Фронтенд по умолчанию публикуется на host port `80`, поэтому открывается как
+`http://localhost/web/`. Если порт `80` занят, можно поднять его на другом порту:
+
+```bash
+FRONTEND_PORT=3000 ./scripts/local-up.sh
+```
+
+Тогда адрес будет `http://localhost:3000/web/`.
 
 ## Миграции
 

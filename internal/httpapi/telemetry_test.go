@@ -187,6 +187,9 @@ func TestHTTPInstrumentationAccountsPanicAsServerError(t *testing.T) {
 	if !strings.Contains(metricsRecorder.Body.String(), `http_response_status_code="500"`) {
 		t.Fatalf("panic не учтён как 500 в метриках: %s", metricsRecorder.Body.String())
 	}
+	if !strings.Contains(metricsRecorder.Body.String(), `status_class="5xx"`) {
+		t.Fatalf("panic не учтён как 5xx в метриках: %s", metricsRecorder.Body.String())
+	}
 }
 
 // TestNormalizedHTTPRoute проверяет шаблоны всех текущих маршрутов

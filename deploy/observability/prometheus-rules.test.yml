@@ -1,0 +1,79 @@
+rule_files:
+  - prometheus-rules.yml
+
+evaluation_interval: 30s
+
+tests:
+  - interval: 30s
+    input_series:
+      - series: 'http_server_request_count_total{job="gophprofile-server",status_class="5xx"}'
+        values: '0+4x12 48+0x16'
+      - series: 'http_server_request_count_total{job="gophprofile-server",status_class="2xx"}'
+        values: '0+20x28'
+    alert_rule_test:
+      - eval_time: 30s
+        alertname: HighErrorRate
+        exp_alerts: []
+      - eval_time: 2m
+        alertname: HighErrorRate
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              service: server
+              runbook: docs/runbooks/observability-alerts.md#higherrorrate
+            exp_annotations:
+              summary: Доля HTTP 5xx выше 10%
+              description: За последние 5 минут больше 10% HTTP-запросов завершились server error
+      - eval_time: 13m
+        alertname: HighErrorRate
+        exp_alerts: []
+
+  - interval: 30s
+    input_series:
+      - series: 'http_server_request_count_total{job="gophprofile-server",status_class="2xx"}'
+        values: '0+0x20'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: HighErrorRate
+        exp_alerts: []
+
+  - interval: 30s
+    input_series:
+      - series: 'gophprofile_http_server_request_duration_seconds_bucket{le="1"}'
+        values: '0+0x12'
+      - series: 'gophprofile_http_server_request_duration_seconds_bucket{le="5"}'
+        values: '0+0x12'
+      - series: 'gophprofile_http_server_request_duration_seconds_bucket{le="10"}'
+        values: '0+10x12'
+      - series: 'gophprofile_http_server_request_duration_seconds_bucket{le="+Inf"}'
+        values: '0+10x12'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: HighResponseTime
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: HighResponseTime
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              service: server
+              runbook: docs/runbooks/observability-alerts.md#highresponsetime
+            exp_annotations:
+              summary: p95 HTTP latency выше 5 секунд
+              description: 95-й перцентиль времени ответа API держится выше 5 секунд
+
+  - interval: 30s
+    input_series:
+      - series: 'app_avatar_processing_count_total{result="dead_letter"}'
+        values: '0+0x6 1+0x6'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: AvatarDeadLetterDetected
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              service: worker
+              runbook: docs/runbooks/observability-alerts.md#avatardeadletterdetected
+            exp_annotations:
+              summary: Обнаружено dead-letter событие обработки аватара
+              description: Worker исчерпал попытки обработки хотя бы одного сообщения за последние 5 минут

@@ -2,8 +2,10 @@ package httpapi
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/metric"
 	semconv "go.opentelemetry.io/otel/semconv/v1.40.0"
@@ -70,6 +72,7 @@ func (r *Router) serveObserved(w http.ResponseWriter, req *http.Request, route s
 			semconv.HTTPRequestMethodKey.String(req.Method),
 			semconv.HTTPRoute(route),
 			semconv.HTTPResponseStatusCode(statusCode),
+			attribute.String("status_class", httpStatusClass(statusCode)),
 		)
 		r.telemetry.requests.Add(ctx, 1, completedAttributes)
 		r.telemetry.activeRequests.Add(ctx, -1, activeAttributes)
@@ -80,6 +83,14 @@ func (r *Router) serveObserved(w http.ResponseWriter, req *http.Request, route s
 	}()
 
 	r.serveRequest(recorder, req)
+}
+
+// httpStatusClass возвращает класс HTTP-ответа для правил и панелей
+func httpStatusClass(statusCode int) string {
+	if statusCode < 100 || statusCode > 599 {
+		return "unknown"
+	}
+	return strconv.Itoa(statusCode/100) + "xx"
 }
 
 // shouldObserveHTTP исключает технические маршруты из tracing и RED-метрик

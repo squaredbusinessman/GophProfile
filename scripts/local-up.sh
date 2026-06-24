@@ -7,8 +7,11 @@ COMPOSE_BASE_FILE=${COMPOSE_BASE_FILE:-${COMPOSE_FILE:-"$ROOT_DIR/deploy/docker-
 COMPOSE_OBSERVABILITY_FILE=${COMPOSE_OBSERVABILITY_FILE:-"$ROOT_DIR/deploy/docker-compose.observability.yml"}
 TIMEOUT_SECONDS=${LOCAL_UP_TIMEOUT:-300}
 S3_BUCKET=${S3_BUCKET:-gophprofile-avatars}
+FRONTEND_PORT=${FRONTEND_PORT:-80}
 BUILD=1
 FOLLOW_LOGS=0
+
+export FRONTEND_PORT
 
 usage() {
 	cat <<USAGE
@@ -22,6 +25,7 @@ Environment:
   COMPOSE_BASE_FILE           Path to the base compose file
   COMPOSE_OBSERVABILITY_FILE  Path to the observability overlay
   LOCAL_UP_TIMEOUT            Wait timeout in seconds, default 300
+  FRONTEND_PORT               Host port for frontend, default 80
   S3_BUCKET                   Expected local MinIO bucket, default gophprofile-avatars
 USAGE
 }
@@ -49,6 +53,14 @@ done
 
 log() {
 	printf '%s\n' "$1"
+}
+
+frontend_url() {
+	if [ "$FRONTEND_PORT" = "80" ]; then
+		printf 'http://localhost/web/'
+	else
+		printf 'http://localhost:%s/web/' "$FRONTEND_PORT"
+	fi
 }
 
 compose() {
@@ -235,7 +247,7 @@ log ""
 log "Local environment is ready"
 log "Server API:      http://localhost:8080"
 log "Healthcheck:     http://localhost:8080/health"
-log "Frontend:        http://localhost:3000/web/"
+log "Frontend:        $(frontend_url)"
 log "MinIO Console:   http://localhost:9001"
 log "PostgreSQL:      localhost:5432"
 log "Kafka:           localhost:9092"
