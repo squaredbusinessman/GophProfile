@@ -44,6 +44,12 @@ targets server/worker в Prometheus, readiness Loki и Alloy, JSON logs обои
 ./scripts/local-up.sh --logs
 ```
 
+Smoke-проверка полного пути observability:
+
+```bash
+./scripts/observability-smoke.sh
+```
+
 Низкоуровневый compose-запуск из директории `deploy`:
 
 ```bash
@@ -141,6 +147,21 @@ DEFAULT_AVATAR_PATH=/app/default_avatar.png
 CORS_ALLOWED_ORIGINS=http://localhost,http://localhost:3000,http://localhost:5173
 ```
 
+Observability env:
+
+```text
+APP_ENV=local
+LOG_LEVEL=info
+LOG_FORMAT=json
+OTEL_ENABLED=true
+OTEL_SERVICE_NAME=gophprofile-server|gophprofile-worker
+OTEL_EXPORTER_OTLP_ENDPOINT=jaeger:4317
+OTEL_EXPORTER_OTLP_INSECURE=true
+OTEL_TRACES_SAMPLER=parentbased_always_on
+OTEL_TRACES_SAMPLER_ARG=1
+METRICS_ADDR=:9090|:9091
+```
+
 При `APP_ENV=local` приложения `server` и `worker` создают bucket
 `S3_BUCKET`, если он еще отсутствует.
 
@@ -164,6 +185,64 @@ FRONTEND_PORT=3000 ./scripts/local-up.sh
 ```
 
 Тогда адрес будет `http://localhost:3000/web/`.
+
+## Smoke и диагностика
+
+`scripts/observability-smoke.sh` выполняет полный пользовательский путь:
+
+- проверяет readiness Prometheus, Jaeger, Loki и Grafana
+- создаёт пользователя
+- загружает маленький валидный PNG
+- ждёт status `ready`
+- читает avatar
+- удаляет avatar
+- проверяет application metrics в Prometheus
+- ищет trace `server -> worker` в Jaeger
+- ищет log с тем же `trace_id` в Loki
+
+Полезные API:
+
+```bash
+curl http://localhost:9090/api/v1/targets
+curl 'http://localhost:9090/api/v1/query?query=up'
+curl http://localhost:16686/api/services
+curl 'http://localhost:16686/api/traces?service=gophprofile-server&limit=20&lookback=1h'
+curl http://localhost:3100/loki/api/v1/label/service/values
+curl 'http://localhost:3100/loki/api/v1/query_range?query=%7Bservice%3D~%22server%7Cworker%22%7D'
+curl http://localhost:3001/api/health
+```
+
+Поиск logs по trace ID:
+
+```logql
+{service=~"server|worker"} |= "0721d079ec1bdab9194635684f0177b2"
+```
+
+Типовой путь расследования:
+
+1. Открыть Grafana `Service Overview`
+2. Найти рост 5xx, p95 latency, in-flight requests или ERROR logs
+3. Взять `trace_id` из error log
+4. Открыть trace в Jaeger и найти медленный или ошибочный span
+5. По тому же `trace_id` посмотреть связанные logs в Loki
+6. Проверить `Dependencies and Resources`: PostgreSQL pool, Kafka lag, S3 и container metrics
+7. При alert открыть runbook из label `runbook`
+
+## Проверки
+
+```bash
+go test ./...
+go test ./... -coverprofile=coverage.out
+go tool cover -func=coverage.out
+go vet ./...
+golangci-lint run ./...
+(cd web/frontend && npm run build)
+docker compose -f deploy/docker-compose.yml config --quiet
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.observability.yml config --quiet
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.observability.yml run --rm --no-deps --entrypoint promtool -v "$PWD/deploy/observability:/etc/prometheus:ro" prometheus check config /etc/prometheus/prometheus.yml
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.observability.yml run --rm --no-deps --entrypoint promtool -v "$PWD/deploy/observability:/etc/prometheus:ro" prometheus check rules /etc/prometheus/prometheus-rules.yml
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.observability.yml run --rm --no-deps --entrypoint promtool -v "$PWD/deploy/observability:/etc/prometheus:ro" prometheus test rules /etc/prometheus/prometheus-rules.test.yml
+```
 
 ## Миграции
 
