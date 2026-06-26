@@ -119,6 +119,7 @@ const avatarList = document.querySelector('#avatarList');
 const responseOutput = document.querySelector('#responseOutput');
 const apiStatus = document.querySelector('#apiStatus');
 const tabs = document.querySelectorAll('.tab');
+let previewObjectURL = '';
 
 document.addEventListener('DOMContentLoaded', checkHealth);
 
@@ -138,12 +139,13 @@ avatarFile.addEventListener('change', () => {
   const validationError = validateFile(file);
   if (validationError) {
     showNotice(validationError, 'error');
-    avatarFile.value = '';
-    clearPreview();
+    clearUploadFile();
     return;
   }
 
-  previewImage.src = URL.createObjectURL(file);
+  clearPreview();
+  previewObjectURL = URL.createObjectURL(file);
+  previewImage.src = previewObjectURL;
   previewName.textContent = file.name;
   previewMeta.textContent = `${file.type}, ${formatBytes(file.size)}`;
   preview.classList.add('is-visible');
@@ -219,6 +221,7 @@ uploadForm.addEventListener('submit', async (event) => {
     }
 
     showNotice('Аватарка отправлена на обработку', 'success');
+    clearUploadFile();
     galleryUserID.value = data?.user_id || userID;
     galleryEmail.value = email;
     activateTab('gallery');
@@ -593,10 +596,19 @@ function hideNotice() {
 }
 
 function clearPreview() {
+  if (previewObjectURL) {
+    URL.revokeObjectURL(previewObjectURL);
+    previewObjectURL = '';
+  }
   preview.classList.remove('is-visible');
   previewImage.removeAttribute('src');
   previewName.textContent = '';
   previewMeta.textContent = '';
+}
+
+function clearUploadFile() {
+  avatarFile.value = '';
+  clearPreview();
 }
 
 function renderEmptyState(message) {
