@@ -63,8 +63,12 @@ type sqlExecutor interface {
 }
 
 // NewAvatarRepository создаёт репозиторий аватаров в PostgreSQL
-func NewAvatarRepository(db *sql.DB) *AvatarRepository {
-	return &AvatarRepository{db: db, telemetry: newPostgresTelemetry()}
+func NewAvatarRepository(db *sql.DB) (*AvatarRepository, error) {
+	telemetry, err := newPostgresTelemetry()
+	if err != nil {
+		return nil, fmt.Errorf("create avatar repository telemetry: %w", err)
+	}
+	return &AvatarRepository{db: db, telemetry: telemetry}, nil
 }
 
 // CreateAvatar сохраняет новый аватар в состоянии обработки

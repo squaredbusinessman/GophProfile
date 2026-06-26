@@ -25,7 +25,7 @@ func TestOutboxPublisherPublishesPendingEvents(t *testing.T) {
 		},
 	}
 	publisher := &fakeEventPublisher{}
-	service := NewOutboxPublisherService(store, publisher)
+	service := newOutboxPublisherServiceForTest(t, store, publisher)
 	service.now = func() time.Time { return time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC) }
 
 	published, err := service.PublishPending(context.Background(), 100)
@@ -54,7 +54,7 @@ func TestOutboxPublisherKeepsEventPendingWhenPublishFails(t *testing.T) {
 	}
 	const secret = "postgres://secret:password@db:5432/gophprofile"
 	publisher := &fakeEventPublisher{publishErr: errors.New(secret)}
-	service := NewOutboxPublisherService(store, publisher)
+	service := newOutboxPublisherServiceForTest(t, store, publisher)
 	var logs bytes.Buffer
 	ctx := ContextWithLogger(context.Background(), zerolog.New(&logs))
 
@@ -73,11 +73,48 @@ func TestOutboxPublisherKeepsEventPendingWhenPublishFails(t *testing.T) {
 	}
 }
 
+// TestOutboxPublisherLogsStateUpdateError проверяет журналирование ошибки записи publish attempt
+func TestOutboxPublisherLogsStateUpdateError(t *testing.T) {
+	const secret = "postgres://secret:password@db:5432/gophprofile"
+	store := &fakeOutboxEventStore{
+		events: []outbox.Event{
+			{
+				ID:      "event-1",
+				Topic:   "avatar.process.v1",
+				Key:     "avatar-1",
+				Payload: []byte(`{"avatar_id":"avatar-1"}`),
+			},
+		},
+		markFailedAttemptErr: errors.New(secret),
+	}
+	publisher := &fakeEventPublisher{publishErr: errors.New("kafka down")}
+	service := newOutboxPublisherServiceForTest(t, store, publisher)
+	var logs bytes.Buffer
+	ctx := ContextWithLogger(context.Background(), zerolog.New(&logs))
+
+	published, err := service.PublishPending(ctx, 100)
+	if err != nil {
+		t.Fatalf("PublishPending returned error: %v", err)
+	}
+	if published != 0 {
+		t.Fatalf("published = %d, want 0", published)
+	}
+	logText := logs.String()
+	if !strings.Contains(logText, `"level":"error"`) || !strings.Contains(logText, `"operation":"mark_publish_attempt_failed"`) {
+		t.Fatalf("log does not contain expected outbox state error: %s", logText)
+	}
+	if strings.Contains(logText, secret) || strings.Contains(logText, `{"avatar_id"`) || strings.Contains(logText, "avatar-1") {
+		t.Fatalf("log contains sensitive message data: %s", logText)
+	}
+}
+
 type fakeOutboxEventStore struct {
 	events                  []outbox.Event
 	listErr                 error
 	markPublishedCalled     bool
 	markFailedAttemptCalled bool
+	markPublishedErr        error
+	markFailedAttemptErr    error
 }
 
 // ListPendingOutboxEvents возвращает fake pending outbox события
@@ -91,11 +128,11 @@ func (f *fakeOutboxEventStore) ListPendingOutboxEvents(ctx context.Context, limi
 // MarkOutboxPublished запоминает fake-успешную публикацию
 func (f *fakeOutboxEventStore) MarkOutboxPublished(ctx context.Context, id string, publishedAt time.Time) error {
 	f.markPublishedCalled = true
-	return nil
+	return f.markPublishedErr
 }
 
 // MarkOutboxPublishAttemptFailed запоминает fake-ошибку публикации
 func (f *fakeOutboxEventStore) MarkOutboxPublishAttemptFailed(ctx context.Context, id string, publishErr error, updatedAt time.Time) error {
 	f.markFailedAttemptCalled = true
-	return nil
+	return f.markFailedAttemptErr
 }

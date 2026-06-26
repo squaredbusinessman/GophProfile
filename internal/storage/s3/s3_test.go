@@ -45,7 +45,7 @@ func TestObjectKeyBuildersEscapeUnsafeSegments(t *testing.T) {
 // TestPutDelegatesToObjectStorageAPI проверяет сохранение объекта через adapter
 func TestPutDelegatesToObjectStorageAPI(t *testing.T) {
 	api := &fakeObjectStorageAPI{}
-	client := newClientWithRegion("avatars", "", api)
+	client := newClientWithRegionForTest(t, "avatars", "", api)
 
 	err := client.Put(context.Background(), "avatars/user/avatar/original", strings.NewReader("image"), 5, "image/jpeg")
 	if err != nil {
@@ -79,7 +79,7 @@ func TestGetReturnsStreamAndMetadata(t *testing.T) {
 			LastModified: lastModified,
 		},
 	}
-	client := newClientWithRegion("avatars", "", api)
+	client := newClientWithRegionForTest(t, "avatars", "", api)
 
 	body, metadata, err := client.Get(context.Background(), "avatars/user/avatar/original")
 	if err != nil {
@@ -106,7 +106,7 @@ func TestDeleteIgnoresNotFound(t *testing.T) {
 	api := &fakeObjectStorageAPI{
 		removeErr: minio.ErrorResponse{Code: "NoSuchKey", StatusCode: http.StatusNotFound},
 	}
-	client := newClientWithRegion("avatars", "", api)
+	client := newClientWithRegionForTest(t, "avatars", "", api)
 
 	err := client.Delete(context.Background(), "avatars/user/avatar/original")
 	if err != nil {
@@ -119,7 +119,7 @@ func TestExistsReturnsFalseForNotFound(t *testing.T) {
 	api := &fakeObjectStorageAPI{
 		statErr: minio.ErrorResponse{Code: "NoSuchKey", StatusCode: http.StatusNotFound},
 	}
-	client := newClientWithRegion("avatars", "", api)
+	client := newClientWithRegionForTest(t, "avatars", "", api)
 
 	exists, err := client.Exists(context.Background(), "avatars/user/avatar/original")
 	if err != nil {
@@ -135,7 +135,7 @@ func TestEnsureBucketSkipsExistingBucket(t *testing.T) {
 	api := &fakeObjectStorageAPI{
 		bucketExists: true,
 	}
-	client := newClientWithRegion("avatars", "us-east-1", api)
+	client := newClientWithRegionForTest(t, "avatars", "us-east-1", api)
 
 	if err := client.EnsureBucket(context.Background()); err != nil {
 		t.Fatalf("EnsureBucket returned error: %v", err)
@@ -148,7 +148,7 @@ func TestEnsureBucketSkipsExistingBucket(t *testing.T) {
 // TestEnsureBucketCreatesMissingBucket проверяет создание отсутствующего bucket
 func TestEnsureBucketCreatesMissingBucket(t *testing.T) {
 	api := &fakeObjectStorageAPI{}
-	client := newClientWithRegion("avatars", "us-east-1", api)
+	client := newClientWithRegionForTest(t, "avatars", "us-east-1", api)
 
 	if err := client.EnsureBucket(context.Background()); err != nil {
 		t.Fatalf("EnsureBucket returned error: %v", err)
@@ -166,7 +166,7 @@ func TestGetMapsNotFoundToDomainError(t *testing.T) {
 	api := &fakeObjectStorageAPI{
 		statErr: minio.ErrorResponse{Code: "NoSuchKey", StatusCode: http.StatusNotFound},
 	}
-	client := newClientWithRegion("avatars", "", api)
+	client := newClientWithRegionForTest(t, "avatars", "", api)
 
 	_, _, err := client.Get(context.Background(), "avatars/user/avatar/original")
 	if !errors.Is(err, ErrNotFound) {
@@ -177,7 +177,7 @@ func TestGetMapsNotFoundToDomainError(t *testing.T) {
 // TestInvalidKeyRejectsAbsolutePath проверяет отказ для абсолютного object key
 func TestInvalidKeyRejectsAbsolutePath(t *testing.T) {
 	api := &fakeObjectStorageAPI{}
-	client := newClientWithRegion("avatars", "", api)
+	client := newClientWithRegionForTest(t, "avatars", "", api)
 
 	err := client.Put(context.Background(), "/avatars/user/avatar/original", strings.NewReader("image"), 5, "image/jpeg")
 	if !errors.Is(err, ErrInvalidKey) {

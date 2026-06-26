@@ -86,17 +86,25 @@ func NewClient(cfg config.S3Config) (*Client, error) {
 		return nil, fmt.Errorf("create s3 client: %w", err)
 	}
 
-	return newClientWithRegion(cfg.Bucket, cfg.Region, &minioAdapter{sdk: sdk}), nil
+	client, err := newClientWithRegion(cfg.Bucket, cfg.Region, &minioAdapter{sdk: sdk})
+	if err != nil {
+		return nil, err
+	}
+	return client, nil
 }
 
 // newClientWithRegion создаёт клиент S3 с явно заданным регионом
-func newClientWithRegion(bucket string, region string, api objectStorageAPI) *Client {
+func newClientWithRegion(bucket string, region string, api objectStorageAPI) (*Client, error) {
+	telemetry, err := newS3Telemetry()
+	if err != nil {
+		return nil, fmt.Errorf("create s3 telemetry: %w", err)
+	}
 	return &Client{
 		bucket:    bucket,
 		region:    region,
 		api:       api,
-		telemetry: newS3Telemetry(),
-	}
+		telemetry: telemetry,
+	}, nil
 }
 
 // Put сохраняет объект в S3-compatible хранилище

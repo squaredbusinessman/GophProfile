@@ -18,8 +18,12 @@ type UserRepository struct {
 }
 
 // NewUserRepository создаёт репозиторий пользователей в PostgreSQL
-func NewUserRepository(db *sql.DB) *UserRepository {
-	return &UserRepository{db: db, telemetry: newPostgresTelemetry()}
+func NewUserRepository(db *sql.DB) (*UserRepository, error) {
+	telemetry, err := newPostgresTelemetry()
+	if err != nil {
+		return nil, fmt.Errorf("create user repository telemetry: %w", err)
+	}
+	return &UserRepository{db: db, telemetry: telemetry}, nil
 }
 
 // CreateUser сохраняет нового пользователя

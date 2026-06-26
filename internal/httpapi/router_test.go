@@ -16,7 +16,7 @@ import (
 
 // TestHealthReturnsOK проверяет успешный ответ healthcheck
 func TestHealthReturnsOK(t *testing.T) {
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		ServiceName: "gophprofile",
 		Version:     "test",
 		Logger:      zerolog.Nop(),
@@ -48,7 +48,7 @@ func TestHealthReturnsOK(t *testing.T) {
 
 // TestHealthReturnsDependencyChecks проверяет успешные статусы внешних зависимостей
 func TestHealthReturnsDependencyChecks(t *testing.T) {
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		ServiceName: "gophprofile",
 		Version:     "test",
 		Logger:      zerolog.Nop(),
@@ -90,7 +90,7 @@ func TestHealthReturnsDependencyChecks(t *testing.T) {
 
 // TestHealthReturnsServiceUnavailableForFailedCheck проверяет degraded статус при ошибке зависимости
 func TestHealthReturnsServiceUnavailableForFailedCheck(t *testing.T) {
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		ServiceName: "gophprofile",
 		Version:     "test",
 		Logger:      zerolog.Nop(),
@@ -130,7 +130,7 @@ func TestHealthReturnsServiceUnavailableForFailedCheck(t *testing.T) {
 
 // TestHealthRejectsUnsupportedMethod проверяет отказ для неподдержанного метода
 func TestHealthRejectsUnsupportedMethod(t *testing.T) {
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		ServiceName: "gophprofile",
 		Version:     "test",
 		Logger:      zerolog.Nop(),
@@ -152,7 +152,7 @@ func TestHealthRejectsUnsupportedMethod(t *testing.T) {
 // TestHTTPAccessLogUsesInfoForSuccess проверяет info-уровень для успешного запроса
 func TestHTTPAccessLogUsesInfoForSuccess(t *testing.T) {
 	var logs bytes.Buffer
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		ServiceName: "gophprofile",
 		Version:     "test",
 		Logger:      zerolog.New(&logs),
@@ -174,7 +174,7 @@ func TestHTTPAccessLogUsesInfoForSuccess(t *testing.T) {
 // TestHTTPAccessLogUsesWarnForClientError проверяет warn-уровень для клиентской ошибки
 func TestHTTPAccessLogUsesWarnForClientError(t *testing.T) {
 	var logs bytes.Buffer
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		ServiceName: "gophprofile",
 		Version:     "test",
 		Logger:      zerolog.New(&logs),
@@ -193,7 +193,7 @@ func TestHTTPAccessLogUsesWarnForClientError(t *testing.T) {
 // TestRequestIDIsStoredInHandlerContext проверяет передачу request_id в context обработчика
 func TestRequestIDIsStoredInHandlerContext(t *testing.T) {
 	var requestID string
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		Logger: zerolog.Nop(),
 		HealthChecks: map[string]HealthCheck{
 			"context": func(ctx context.Context) error {
@@ -215,7 +215,7 @@ func TestRequestIDIsStoredInHandlerContext(t *testing.T) {
 // TestValidationErrorDoesNotProduceInternalErrorLog проверяет уровень validation ошибки
 func TestValidationErrorDoesNotProduceInternalErrorLog(t *testing.T) {
 	var logs bytes.Buffer
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		Logger:       zerolog.New(&logs),
 		UserResolver: failingUserResolver{},
 	})
@@ -236,7 +236,7 @@ func TestValidationErrorDoesNotProduceInternalErrorLog(t *testing.T) {
 func TestInternalErrorLogDoesNotExposeDSN(t *testing.T) {
 	const secretDSN = "postgres://secret:password@db:5432/gophprofile"
 	var logs bytes.Buffer
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		Logger:       zerolog.New(&logs),
 		UserResolver: failingUserResolver{err: errors.New(secretDSN)},
 	})

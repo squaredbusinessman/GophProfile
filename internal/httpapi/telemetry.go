@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -24,21 +25,27 @@ type httpServerTelemetry struct {
 }
 
 // newHTTPServerTelemetry создаёт инструменты HTTP-телеметрии из global providers
-func newHTTPServerTelemetry(meter metric.Meter) httpServerTelemetry {
-	requests, _ := meter.Int64Counter(
+func newHTTPServerTelemetry(meter metric.Meter) (httpServerTelemetry, error) {
+	requests, err := meter.Int64Counter(
 		"http.server.request.count",
 		metric.WithDescription("Количество завершённых HTTP-запросов"),
 		metric.WithUnit("{request}"),
 	)
-	activeRequests, _ := meter.Int64UpDownCounter(
+	if err != nil {
+		return httpServerTelemetry{}, fmt.Errorf("create HTTP request counter: %w", err)
+	}
+	activeRequests, err := meter.Int64UpDownCounter(
 		"http.server.active_requests",
 		metric.WithDescription("Количество выполняющихся HTTP-запросов"),
 		metric.WithUnit("{request}"),
 	)
+	if err != nil {
+		return httpServerTelemetry{}, fmt.Errorf("create HTTP active requests counter: %w", err)
+	}
 	return httpServerTelemetry{
 		requests:       requests,
 		activeRequests: activeRequests,
-	}
+	}, nil
 }
 
 // serveObserved обрабатывает запрос внутри серверного span и записывает RED-метрики

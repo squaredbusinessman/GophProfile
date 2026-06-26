@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -55,85 +56,80 @@ type businessTelemetry struct {
 	outboxPublishes metric.Int64Counter
 }
 
-// newBusinessTelemetry создаёт инструменты и инициализирует ожидаемые результаты нулями
-func newBusinessTelemetry() businessTelemetry {
+// newBusinessTelemetry создаёт инструменты бизнес-метрик
+func newBusinessTelemetry() (businessTelemetry, error) {
 	meter := otel.Meter(appInstrumentationName)
-	uploads, _ := meter.Int64Counter(
+	uploads, err := meter.Int64Counter(
 		"app.avatar.upload.count",
 		metric.WithDescription("Количество завершённых загрузок аватаров по результату"),
 		metric.WithUnit("{upload}"),
 	)
-	uploadDuration, _ := meter.Float64Histogram(
+	if err != nil {
+		return businessTelemetry{}, fmt.Errorf("create avatar upload counter: %w", err)
+	}
+	uploadDuration, err := meter.Float64Histogram(
 		"app.avatar.upload.duration",
 		metric.WithDescription("Продолжительность загрузки аватара"),
 		metric.WithUnit("s"),
 	)
-	uploadBytes, _ := meter.Int64Counter(
+	if err != nil {
+		return businessTelemetry{}, fmt.Errorf("create avatar upload duration histogram: %w", err)
+	}
+	uploadBytes, err := meter.Int64Counter(
 		"app.avatar.upload.bytes",
 		metric.WithDescription("Количество байтов принятых оригиналов аватаров"),
 		metric.WithUnit("By"),
 	)
-	processing, _ := meter.Int64Counter(
+	if err != nil {
+		return businessTelemetry{}, fmt.Errorf("create avatar upload bytes counter: %w", err)
+	}
+	processing, err := meter.Int64Counter(
 		"app.avatar.processing.count",
 		metric.WithDescription("Количество завершённых попыток обработки аватаров по результату"),
 		metric.WithUnit("{attempt}"),
 	)
-	processDuration, _ := meter.Float64Histogram(
+	if err != nil {
+		return businessTelemetry{}, fmt.Errorf("create avatar processing counter: %w", err)
+	}
+	processDuration, err := meter.Float64Histogram(
 		"app.avatar.processing.duration",
 		metric.WithDescription("Продолжительность попытки обработки аватара"),
 		metric.WithUnit("s"),
 	)
-	deletes, _ := meter.Int64Counter(
+	if err != nil {
+		return businessTelemetry{}, fmt.Errorf("create avatar processing duration histogram: %w", err)
+	}
+	deletes, err := meter.Int64Counter(
 		"app.avatar.delete.count",
 		metric.WithDescription("Количество операций удаления аватаров по этапу и результату"),
 		metric.WithUnit("{operation}"),
 	)
-	deleteDuration, _ := meter.Float64Histogram(
+	if err != nil {
+		return businessTelemetry{}, fmt.Errorf("create avatar delete counter: %w", err)
+	}
+	deleteDuration, err := meter.Float64Histogram(
 		"app.avatar.delete.duration",
 		metric.WithDescription("Продолжительность операции удаления аватара"),
 		metric.WithUnit("s"),
 	)
-	outboxPublishes, _ := meter.Int64Counter(
+	if err != nil {
+		return businessTelemetry{}, fmt.Errorf("create avatar delete duration histogram: %w", err)
+	}
+	outboxPublishes, err := meter.Int64Counter(
 		"app.outbox.publish.count",
 		metric.WithDescription("Количество попыток публикации событий outbox по режиму и результату"),
 		metric.WithUnit("{attempt}"),
 	)
+	if err != nil {
+		return businessTelemetry{}, fmt.Errorf("create outbox publish counter: %w", err)
+	}
 
-	telemetry := businessTelemetry{
+	return businessTelemetry{
 		uploads: uploads, uploadBytes: uploadBytes, uploadDuration: uploadDuration,
 		processing: processing, processDuration: processDuration,
 		deletes: deletes, deleteDuration: deleteDuration,
 		outboxPublishes: outboxPublishes,
-	}
-	telemetry.initialize(context.Background())
-	return telemetry
-}
-
-// initialize создаёт временные ряды для всех ожидаемых комбинаций меток
-func (t businessTelemetry) initialize(ctx context.Context) {
-	for _, result := range []string{uploadResultAccepted, uploadResultError} {
-		t.uploads.Add(ctx, 0, metric.WithAttributes(resultAttribute.String(result)))
-	}
-	t.uploadBytes.Add(ctx, 0)
-	for _, result := range []string{processResultReady, processResultFailed, processResultDeadLetter, processResultRetryScheduled, processResultIdempotentSkip, processResultError} {
-		t.processing.Add(ctx, 0, metric.WithAttributes(resultAttribute.String(result)))
-	}
-	for _, labels := range []struct{ phase, result string }{
-		{deletePhaseRequest, deleteResultAccepted},
-		{deletePhaseRequest, deleteResultIdempotentSkip},
-		{deletePhaseRequest, deleteResultRejected},
-		{deletePhaseRequest, deleteResultError},
-		{deletePhaseExecute, deleteResultCompleted},
-		{deletePhaseExecute, deleteResultIdempotentSkip},
-		{deletePhaseExecute, deleteResultError},
-	} {
-		t.deletes.Add(ctx, 0, metric.WithAttributes(phaseAttribute.String(labels.phase), resultAttribute.String(labels.result)))
-	}
-	for _, mode := range []string{outboxPublishModeImmediate, outboxPublishModeBackground} {
-		for _, result := range []string{outboxPublishResultSuccess, outboxPublishResultError} {
-			t.outboxPublishes.Add(ctx, 0, metric.WithAttributes(modeAttribute.String(mode), resultAttribute.String(result)))
-		}
-	}
+	}, nil
 }
 
 // recordUpload записывает результат и продолжительность загрузки

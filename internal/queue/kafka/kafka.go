@@ -90,12 +90,18 @@ func NewClient(brokers []string, clientID string, consumerGroup string) (*Client
 		producer.Close()
 		return nil, fmt.Errorf("create kafka consumer: %w", err)
 	}
+	telemetry, err := newKafkaTelemetry()
+	if err != nil {
+		producer.Close()
+		_ = consumer.Close()
+		return nil, fmt.Errorf("create kafka telemetry: %w", err)
+	}
 
 	return &Client{
 		producer:      producer,
 		consumer:      consumer,
 		consumerGroup: consumerGroup,
-		telemetry:     newKafkaTelemetry(),
+		telemetry:     telemetry,
 	}, nil
 }
 

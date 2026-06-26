@@ -105,7 +105,11 @@ type AvatarDeleter interface {
 }
 
 // NewRouter создаёт HTTP-маршрутизатор приложения
-func NewRouter(cfg RouterConfig) http.Handler {
+func NewRouter(cfg RouterConfig) (http.Handler, error) {
+	telemetry, err := newHTTPServerTelemetry(otel.Meter(instrumentationName))
+	if err != nil {
+		return nil, fmt.Errorf("create HTTP telemetry: %w", err)
+	}
 	router := &Router{
 		serviceName:    cfg.ServiceName,
 		version:        cfg.Version,
@@ -119,7 +123,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 		avatarReader:   cfg.AvatarReader,
 		avatarDeleter:  cfg.AvatarDeleter,
 		mux:            http.NewServeMux(),
-		telemetry:      newHTTPServerTelemetry(otel.Meter(instrumentationName)),
+		telemetry:      telemetry,
 	}
 
 	router.mux.HandleFunc("/health", router.handleHealth)
@@ -141,7 +145,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 		otelhttp.WithMetricAttributesFn(func(req *http.Request) []attribute.KeyValue {
 			return []attribute.KeyValue{semconv.HTTPRoute(normalizedHTTPRoute(req.URL.Path))}
 		}),
-	)
+	), nil
 }
 
 // ServeHTTP обрабатывает HTTP-запрос и записывает журнал доступа с корректным уровнем

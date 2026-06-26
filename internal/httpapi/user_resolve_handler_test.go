@@ -25,7 +25,7 @@ func TestUserResolveReturnsUserID(t *testing.T) {
 			UpdatedAt: now,
 		},
 	}
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		ServiceName:  "gophprofile",
 		Version:      "test",
 		Logger:       zerolog.Nop(),
@@ -56,7 +56,7 @@ func TestUserResolveReturnsUserID(t *testing.T) {
 
 // TestUserResolveRejectsInvalidEmail проверяет валидацию email
 func TestUserResolveRejectsInvalidEmail(t *testing.T) {
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		ServiceName:  "gophprofile",
 		Version:      "test",
 		Logger:       zerolog.Nop(),
@@ -76,7 +76,7 @@ func TestUserResolveRejectsInvalidEmail(t *testing.T) {
 
 // TestUserResolveRejectsUnsupportedMethod проверяет ограничение HTTP method
 func TestUserResolveRejectsUnsupportedMethod(t *testing.T) {
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		ServiceName:  "gophprofile",
 		Version:      "test",
 		Logger:       zerolog.Nop(),
@@ -98,7 +98,7 @@ func TestUserResolveRejectsUnsupportedMethod(t *testing.T) {
 
 // TestUserResolveRequiresConfiguredResolver проверяет отказ без user resolver
 func TestUserResolveRequiresConfiguredResolver(t *testing.T) {
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		ServiceName: "gophprofile",
 		Version:     "test",
 		Logger:      zerolog.Nop(),
@@ -117,7 +117,7 @@ func TestUserResolveRequiresConfiguredResolver(t *testing.T) {
 
 // TestUserResolveRejectsMalformedBody проверяет отказ для некорректного JSON
 func TestUserResolveRejectsMalformedBody(t *testing.T) {
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		ServiceName:  "gophprofile",
 		Version:      "test",
 		Logger:       zerolog.Nop(),
@@ -137,7 +137,7 @@ func TestUserResolveRejectsMalformedBody(t *testing.T) {
 
 // TestUserResolveRejectsOversizedBody проверяет ограничение размера request body
 func TestUserResolveRejectsOversizedBody(t *testing.T) {
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		ServiceName:  "gophprofile",
 		Version:      "test",
 		Logger:       zerolog.Nop(),
@@ -158,7 +158,7 @@ func TestUserResolveRejectsOversizedBody(t *testing.T) {
 
 // TestUserResolveErrorDoesNotLeakInternalDetails проверяет что ошибка resolver не раскрывает секреты
 func TestUserResolveErrorDoesNotLeakInternalDetails(t *testing.T) {
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		ServiceName: "gophprofile",
 		Version:     "test",
 		Logger:      zerolog.Nop(),

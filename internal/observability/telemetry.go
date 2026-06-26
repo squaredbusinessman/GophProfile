@@ -42,8 +42,6 @@ type Telemetry struct {
 	mu sync.Mutex
 	// metricsServer обслуживает отдельный HTTP-адрес метрик
 	metricsServer *http.Server
-	// metricsDone принимает результат завершения сервера метрик
-	metricsDone chan error
 	// metricRegistrations содержат callback-регистрации runtime metrics
 	metricRegistrations []otelmetric.Registration
 }
@@ -159,7 +157,6 @@ func (t *Telemetry) StartMetricsServer(addr string) error {
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", t.MetricsHandler)
 	t.metricsServer = &http.Server{Addr: addr, Handler: mux}
-	t.metricsDone = make(chan error, 1)
 	go func() {
 		err := t.metricsServer.Serve(listener)
 		if errors.Is(err, http.ErrServerClosed) {
@@ -168,7 +165,6 @@ func (t *Telemetry) StartMetricsServer(addr string) error {
 		if err != nil {
 			otel.Handle(fmt.Errorf("metrics server: %w", err))
 		}
-		t.metricsDone <- err
 	}()
 	return nil
 }
@@ -177,7 +173,6 @@ func (t *Telemetry) StartMetricsServer(addr string) error {
 func (t *Telemetry) Shutdown(ctx context.Context) error {
 	t.mu.Lock()
 	server := t.metricsServer
-	done := t.metricsDone
 	registrations := append([]otelmetric.Registration(nil), t.metricRegistrations...)
 	t.mu.Unlock()
 
@@ -190,8 +185,6 @@ func (t *Telemetry) Shutdown(ctx context.Context) error {
 	if server != nil {
 		if err := server.Shutdown(ctx); err != nil {
 			errs = append(errs, fmt.Errorf("shutdown metrics server: %w", err))
-		} else if err := <-done; err != nil {
-			errs = append(errs, fmt.Errorf("serve metrics: %w", err))
 		}
 	}
 	if t.TracerProvider != nil {

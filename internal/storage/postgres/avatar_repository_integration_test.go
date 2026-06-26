@@ -30,7 +30,7 @@ func TestIntegrationAvatarRepositorySoftDeleteFiltersActiveReads(t *testing.T) {
 	userID := "6f3f3c2d-df58-4e64-91ea-cdf90f4c9c1e"
 	avatarID := "b3d3a31b-8333-49d7-b921-eccbfdfb5074"
 
-	userRepo := NewUserRepository(db)
+	userRepo := newUserRepositoryForTest(t, db)
 	if err := userRepo.CreateUser(ctx, user.User{
 		ID:        userID,
 		Email:     "user@example.com",
@@ -40,7 +40,7 @@ func TestIntegrationAvatarRepositorySoftDeleteFiltersActiveReads(t *testing.T) {
 		t.Fatalf("CreateUser returned error: %v", err)
 	}
 
-	repo := NewAvatarRepository(db)
+	repo := newAvatarRepositoryForTest(t, db)
 	item := avatar.Avatar{
 		ID:                avatarID,
 		UserID:            userID,
@@ -109,7 +109,7 @@ func TestIntegrationUserRepositoryFindOrCreateKeepsStableID(t *testing.T) {
 
 	ctx := context.Background()
 	now := time.Date(2026, 6, 10, 10, 0, 0, 0, time.UTC)
-	repo := NewUserRepository(db)
+	repo := newUserRepositoryForTest(t, db)
 
 	first, err := repo.FindOrCreateUserByEmail(ctx, "User@Example.COM", now)
 	if err != nil {
@@ -143,7 +143,7 @@ func TestIntegrationPostgresQueryCreatesChildSpan(t *testing.T) {
 
 	ctx, parent := otel.Tracer("integration-test").Start(context.Background(), "upload")
 	parentSpanID := parent.SpanContext().SpanID()
-	repo := NewUserRepository(db)
+	repo := newUserRepositoryForTest(t, db)
 	err := repo.CreateUser(ctx, user.User{
 		ID:        "0c543858-df6a-4596-a3c5-0c8f2d74f153",
 		Email:     "trace@example.com",
@@ -192,7 +192,7 @@ func TestIntegrationOutboxHeadersRoundTrip(t *testing.T) {
 		t.Fatalf("insertOutboxEvent returned error: %v", err)
 	}
 
-	events, err := NewOutboxRepository(db).ListPendingOutboxEvents(context.Background(), 10)
+	events, err := newOutboxRepositoryForTest(t, db).ListPendingOutboxEvents(context.Background(), 10)
 	if err != nil {
 		t.Fatalf("ListPendingOutboxEvents returned error: %v", err)
 	}

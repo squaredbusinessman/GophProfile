@@ -31,7 +31,7 @@ func TestFakeAdapterCreatesSpansForEveryOperation(t *testing.T) {
 		statMetadata: ObjectMetadata{Size: 5, ContentType: "image/png"},
 		bucketExists: true,
 	}
-	client := newClientWithRegion("avatars", "us-east-1", api)
+	client := newClientWithRegionForTest(t, "avatars", "us-east-1", api)
 
 	if err := client.Put(context.Background(), secretObjectKey, strings.NewReader("image"), 5, "image/png"); err != nil {
 		t.Fatalf("Put() error = %v", err)
@@ -79,7 +79,7 @@ func TestFakeAdapterCreatesSpansForEveryOperation(t *testing.T) {
 func TestNotFoundHasExpectedResults(t *testing.T) {
 	recorder, metricsHandler := installS3TestProviders(t)
 	notFound := minio.ErrorResponse{Code: "NoSuchKey", StatusCode: http.StatusNotFound}
-	client := newClientWithRegion("avatars", "", &fakeObjectStorageAPI{
+	client := newClientWithRegionForTest(t, "avatars", "", &fakeObjectStorageAPI{
 		statErr:   notFound,
 		removeErr: notFound,
 	})
@@ -117,7 +117,7 @@ func TestNotFoundHasExpectedResults(t *testing.T) {
 // TestS3ErrorIncrementsErrorCounter проверяет error span и operation counter
 func TestS3ErrorIncrementsErrorCounter(t *testing.T) {
 	recorder, metricsHandler := installS3TestProviders(t)
-	client := newClientWithRegion("avatars", "", &fakeObjectStorageAPI{putErr: errors.New("storage unavailable")})
+	client := newClientWithRegionForTest(t, "avatars", "", &fakeObjectStorageAPI{putErr: errors.New("storage unavailable")})
 
 	err := client.Put(context.Background(), secretObjectKey, strings.NewReader("image"), 5, "image/jpeg")
 	if err == nil {

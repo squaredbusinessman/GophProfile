@@ -28,7 +28,7 @@ func TestHTTPInstrumentationCreatesOneServerSpan(t *testing.T) {
 	defer cleanup()
 	var logs bytes.Buffer
 	resolver := &tracedUserResolver{}
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		Logger:       zerolog.New(&logs),
 		UserResolver: resolver,
 	})
@@ -57,7 +57,7 @@ func TestHTTPInstrumentationCreatesOneServerSpan(t *testing.T) {
 func TestHTTPInstrumentationMarksServerError(t *testing.T) {
 	spanRecorder, cleanup := installHTTPTestProviders(t)
 	defer cleanup()
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		Logger:       zerolog.Nop(),
 		UserResolver: &tracedUserResolver{err: errors.New("database unavailable")},
 	})
@@ -86,7 +86,7 @@ func TestHTTPInstrumentationMarksServerError(t *testing.T) {
 func TestHTTPInstrumentationKeepsClientErrorUnset(t *testing.T) {
 	spanRecorder, cleanup := installHTTPTestProviders(t)
 	defer cleanup()
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		Logger:       zerolog.Nop(),
 		UserResolver: &tracedUserResolver{},
 	})
@@ -109,7 +109,7 @@ func TestHTTPMetricsUseNormalizedRoute(t *testing.T) {
 	const avatarID = "550e8400-e29b-41d4-a716-446655440000"
 	spanRecorder, metricsHandler, cleanup := installHTTPPrometheusProviders(t)
 	defer cleanup()
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		Logger:       zerolog.Nop(),
 		AvatarReader: &fakeAvatarReader{err: app.ErrAvatarNotFound},
 	})
@@ -144,7 +144,7 @@ func TestHTTPMetricsUseNormalizedRoute(t *testing.T) {
 func TestHealthIsExcludedFromHTTPObservability(t *testing.T) {
 	spanRecorder, metricsHandler, cleanup := installHTTPPrometheusProviders(t)
 	defer cleanup()
-	handler := NewRouter(RouterConfig{Logger: zerolog.Nop()})
+	handler := newRouterForTest(t, RouterConfig{Logger: zerolog.Nop()})
 	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/health", nil))
 
 	metricsRecorder := httptest.NewRecorder()
@@ -161,7 +161,7 @@ func TestHealthIsExcludedFromHTTPObservability(t *testing.T) {
 func TestHTTPInstrumentationAccountsPanicAsServerError(t *testing.T) {
 	spanRecorder, metricsHandler, cleanup := installHTTPPrometheusProviders(t)
 	defer cleanup()
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		Logger:       zerolog.Nop(),
 		UserResolver: panicUserResolver{},
 	})

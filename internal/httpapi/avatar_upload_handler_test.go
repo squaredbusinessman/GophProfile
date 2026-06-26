@@ -30,7 +30,7 @@ func TestAvatarUploadReturnsCreated(t *testing.T) {
 			CreatedAt: time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC),
 		},
 	}
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		ServiceName:    "gophprofile",
 		Version:        "test",
 		Logger:         zerolog.Nop(),
@@ -66,7 +66,7 @@ func TestAvatarUploadReturnsCreated(t *testing.T) {
 
 // TestAvatarUploadRejectsMissingUserID проверяет обязательный X-User-ID
 func TestAvatarUploadRejectsMissingUserID(t *testing.T) {
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		ServiceName:    "gophprofile",
 		Version:        "test",
 		Logger:         zerolog.Nop(),
@@ -85,7 +85,7 @@ func TestAvatarUploadRejectsMissingUserID(t *testing.T) {
 
 // TestAvatarUploadReturnsNotFoundForMissingUser проверяет 404 для неизвестного user_id
 func TestAvatarUploadReturnsNotFoundForMissingUser(t *testing.T) {
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		ServiceName:    "gophprofile",
 		Version:        "test",
 		Logger:         zerolog.Nop(),
@@ -104,7 +104,7 @@ func TestAvatarUploadReturnsNotFoundForMissingUser(t *testing.T) {
 
 // TestAvatarUploadReturnsUnavailableWithoutService проверяет отсутствие upload service
 func TestAvatarUploadReturnsUnavailableWithoutService(t *testing.T) {
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		ServiceName: "gophprofile",
 		Version:     "test",
 		Logger:      zerolog.Nop(),

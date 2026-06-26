@@ -77,14 +77,29 @@ func main() {
 		logger.Fatal().Str("error_type", app.ErrorType(err)).Msg("ensure local s3 bucket")
 	}
 
-	avatarRepo := postgres.NewAvatarRepository(db)
-	outboxRepo := postgres.NewOutboxRepository(db)
+	avatarRepo, err := postgres.NewAvatarRepository(db)
+	if err != nil {
+		logger.Fatal().Str("error_type", app.ErrorType(err)).Msg("create avatar repository")
+	}
+	outboxRepo, err := postgres.NewOutboxRepository(db)
+	if err != nil {
+		logger.Fatal().Str("error_type", app.ErrorType(err)).Msg("create outbox repository")
+	}
 	if err := telemetry.RegisterBusinessMetrics(outboxRepo, avatarRepo); err != nil {
 		logger.Fatal().Str("error_type", app.ErrorType(err)).Msg("register business metrics")
 	}
-	outboxPublisher := app.NewOutboxPublisherService(outboxRepo, kafkaClient)
-	avatarProcessor := app.NewAvatarProcessService(avatarRepo, s3Client, kafkaClient)
-	avatarDeleter := app.NewAvatarDeleteWorkerService(avatarRepo, s3Client)
+	outboxPublisher, err := app.NewOutboxPublisherService(outboxRepo, kafkaClient)
+	if err != nil {
+		logger.Fatal().Str("error_type", app.ErrorType(err)).Msg("create outbox publisher")
+	}
+	avatarProcessor, err := app.NewAvatarProcessService(avatarRepo, s3Client, kafkaClient)
+	if err != nil {
+		logger.Fatal().Str("error_type", app.ErrorType(err)).Msg("create avatar processor")
+	}
+	avatarDeleter, err := app.NewAvatarDeleteWorkerService(avatarRepo, s3Client)
+	if err != nil {
+		logger.Fatal().Str("error_type", app.ErrorType(err)).Msg("create avatar deleter")
+	}
 
 	if err := app.RunWorker(ctx, cfg, logger, outboxPublisher, kafkaClient, avatarProcessor, avatarDeleter); err != nil {
 		if !errors.Is(err, context.Canceled) {

@@ -17,7 +17,7 @@ import (
 func TestRepositoryDBErrorMarksSpanWithoutSecrets(t *testing.T) {
 	recorder := installPostgresSpanRecorder(t)
 	db, mock := newMockDB(t)
-	repo := NewUserRepository(db)
+	repo := newUserRepositoryForTest(t, db)
 	const email = "secret@example.com"
 	const dsn = "postgres://secret:password@database:5432/gophprofile"
 

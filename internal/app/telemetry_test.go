@@ -22,7 +22,7 @@ import (
 func TestUploadMetricsTreatPersistedOutboxAsAccepted(t *testing.T) {
 	handler := installBusinessMetricProvider(t)
 	publisher := &fakeEventPublisher{publishErr: errors.New("kafka unavailable")}
-	service := NewAvatarUploadService(
+	service := newAvatarUploadServiceForTest(t,
 		&fakeUserLookup{item: user.User{ID: uploadTestUserID}},
 		&fakeAvatarOutboxStore{},
 		&fakeObjectStore{},
@@ -38,7 +38,7 @@ func TestUploadMetricsTreatPersistedOutboxAsAccepted(t *testing.T) {
 
 	exposition := scrapeBusinessMetrics(t, handler)
 	assertMetricValue(t, exposition, `app_avatar_upload_count_total{result="accepted"}`, "1")
-	assertMetricValue(t, exposition, `app_avatar_upload_count_total{result="error"}`, "0")
+	assertMetricMissing(t, exposition, `app_avatar_upload_count_total{result="error"}`)
 	assertMetricValue(t, exposition, `app_avatar_upload_bytes_total`, "4")
 	assertMetricValue(t, exposition, `app_outbox_publish_count_total{mode="immediate",result="error"}`, "1")
 	assertNoSensitiveMetricData(t, exposition)
@@ -47,7 +47,7 @@ func TestUploadMetricsTreatPersistedOutboxAsAccepted(t *testing.T) {
 // TestProcessingRetryDoesNotIncrementUpload проверяет независимый учёт повторной обработки
 func TestProcessingRetryDoesNotIncrementUpload(t *testing.T) {
 	handler := installBusinessMetricProvider(t)
-	service := NewAvatarProcessService(
+	service := newAvatarProcessServiceForTest(t,
 		&fakeAvatarMetadataStore{getErr: errors.New("temporary database error")},
 		&fakeAvatarObjectStore{},
 		&fakeEventPublisher{},
@@ -60,14 +60,14 @@ func TestProcessingRetryDoesNotIncrementUpload(t *testing.T) {
 
 	exposition := scrapeBusinessMetrics(t, handler)
 	assertMetricValue(t, exposition, `app_avatar_processing_count_total{result="retry_scheduled"}`, "1")
-	assertMetricValue(t, exposition, `app_avatar_upload_count_total{result="accepted"}`, "0")
+	assertMetricMissing(t, exposition, `app_avatar_upload_count_total{result="accepted"}`)
 	assertNoSensitiveMetricData(t, exposition)
 }
 
 // TestProcessingDeadLetterHasSeparateMetric проверяет отдельный результат dead-letter
 func TestProcessingDeadLetterHasSeparateMetric(t *testing.T) {
 	handler := installBusinessMetricProvider(t)
-	service := NewAvatarProcessService(
+	service := newAvatarProcessServiceForTest(t,
 		&fakeAvatarMetadataStore{item: avatar.Avatar{ID: "dead-letter-avatar", UserID: "user", Status: avatar.StatusProcessing, OriginalObjectKey: "original"}},
 		&fakeAvatarObjectStore{getErr: errors.New("temporary storage error")},
 		&fakeEventPublisher{},
@@ -80,14 +80,14 @@ func TestProcessingDeadLetterHasSeparateMetric(t *testing.T) {
 
 	exposition := scrapeBusinessMetrics(t, handler)
 	assertMetricValue(t, exposition, `app_avatar_processing_count_total{result="dead_letter"}`, "1")
-	assertMetricValue(t, exposition, `app_avatar_processing_count_total{result="failed"}`, "0")
+	assertMetricMissing(t, exposition, `app_avatar_processing_count_total{result="failed"}`)
 	assertNoSensitiveMetricData(t, exposition)
 }
 
 // TestDeleteMetricsRecordIdempotentSkip проверяет отдельный результат повторного удаления
 func TestDeleteMetricsRecordIdempotentSkip(t *testing.T) {
 	handler := installBusinessMetricProvider(t)
-	service := NewAvatarDeleteWorkerService(
+	service := newAvatarDeleteWorkerServiceForTest(t,
 		&fakeAvatarDeleteRepository{item: avatar.Avatar{ID: "550e8400-e29b-41d4-a716-446655440000", Status: avatar.StatusDeleted}},
 		&fakeAvatarDeleteObjectStore{},
 	)
@@ -99,14 +99,14 @@ func TestDeleteMetricsRecordIdempotentSkip(t *testing.T) {
 
 	exposition := scrapeBusinessMetrics(t, handler)
 	assertMetricValue(t, exposition, `app_avatar_delete_count_total{phase="execute",result="idempotent_skip"}`, "1")
-	assertMetricValue(t, exposition, `app_avatar_delete_count_total{phase="execute",result="completed"}`, "0")
+	assertMetricMissing(t, exposition, `app_avatar_delete_count_total{phase="execute",result="completed"}`)
 	assertNoSensitiveMetricData(t, exposition)
 }
 
 // TestBusinessMetricsRecordSuccessAndErrorBranches проверяет основные результаты бизнес-операций
 func TestBusinessMetricsRecordSuccessAndErrorBranches(t *testing.T) {
 	handler := installBusinessMetricProvider(t)
-	upload := NewAvatarUploadService(
+	upload := newAvatarUploadServiceForTest(t,
 		&fakeUserLookup{item: user.User{ID: uploadTestUserID}},
 		&fakeAvatarOutboxStore{},
 		&fakeObjectStore{putErr: errors.New("storage unavailable")},
@@ -116,7 +116,7 @@ func TestBusinessMetricsRecordSuccessAndErrorBranches(t *testing.T) {
 		UserID: uploadTestUserID, ContentType: "image/png", Reader: bytes.NewBufferString("body"),
 	})
 
-	ready := NewAvatarProcessService(
+	ready := newAvatarProcessServiceForTest(t,
 		&fakeAvatarMetadataStore{item: avatar.Avatar{ID: "ready-avatar", UserID: "user", Status: avatar.StatusProcessing, OriginalObjectKey: "original"}},
 		&fakeAvatarObjectStore{getBody: processTestPNG(t, 2, 2)},
 		&fakeEventPublisher{},
@@ -125,7 +125,7 @@ func TestBusinessMetricsRecordSuccessAndErrorBranches(t *testing.T) {
 		t.Fatalf("ready HandleProcessMessage() error = %v", err)
 	}
 
-	failed := NewAvatarProcessService(
+	failed := newAvatarProcessServiceForTest(t,
 		&fakeAvatarMetadataStore{item: avatar.Avatar{ID: "failed-avatar", UserID: "user", Status: avatar.StatusProcessing, OriginalObjectKey: "original"}},
 		&fakeAvatarObjectStore{getBody: []byte("invalid image")},
 		&fakeEventPublisher{},
@@ -134,7 +134,7 @@ func TestBusinessMetricsRecordSuccessAndErrorBranches(t *testing.T) {
 		t.Fatalf("failed HandleProcessMessage() error = %v", err)
 	}
 
-	deleteService := NewAvatarDeleteWorkerService(
+	deleteService := newAvatarDeleteWorkerServiceForTest(t,
 		&fakeAvatarDeleteRepository{item: avatar.Avatar{ID: "delete-avatar", Status: avatar.StatusDeleting, OriginalObjectKey: "original"}},
 		&fakeAvatarDeleteObjectStore{},
 	)
@@ -208,6 +208,37 @@ func assertMetricValue(t *testing.T, exposition string, series string, value str
 		}
 	}
 	t.Fatalf("metric %s = %s is missing:\n%s", series, value, exposition)
+}
+
+// assertMetricMissing проверяет отсутствие временного ряда Prometheus
+func assertMetricMissing(t *testing.T, exposition string, series string) {
+	t.Helper()
+	brace := strings.IndexByte(series, '{')
+	if brace == -1 {
+		for _, line := range strings.Split(exposition, "\n") {
+			if strings.HasPrefix(line, series) {
+				t.Fatalf("metric %s should be missing:\n%s", series, exposition)
+			}
+		}
+		return
+	}
+	metricName := series[:brace]
+	labels := strings.Split(strings.TrimSuffix(series[brace+1:], "}"), ",")
+	for _, line := range strings.Split(exposition, "\n") {
+		if !strings.HasPrefix(line, metricName+"{") {
+			continue
+		}
+		matches := true
+		for _, label := range labels {
+			if !strings.Contains(line, label) {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			t.Fatalf("metric %s should be missing:\n%s", series, exposition)
+		}
+	}
 }
 
 // assertNoSensitiveMetricData проверяет отсутствие высококардинальных данных

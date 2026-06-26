@@ -61,14 +61,18 @@ type AvatarProcessMessage struct {
 }
 
 // NewAvatarProcessService создаёт сервис обработки сообщений из темы avatar.process
-func NewAvatarProcessService(avatars AvatarMetadataStore, objects AvatarObjectStore, producer EventPublisher) *AvatarProcessService {
+func NewAvatarProcessService(avatars AvatarMetadataStore, objects AvatarObjectStore, producer EventPublisher) (*AvatarProcessService, error) {
+	telemetry, err := newBusinessTelemetry()
+	if err != nil {
+		return nil, fmt.Errorf("create avatar process telemetry: %w", err)
+	}
 	return &AvatarProcessService{
 		avatars:   avatars,
 		objects:   objects,
 		producer:  producer,
 		now:       time.Now,
-		telemetry: newBusinessTelemetry(),
-	}
+		telemetry: telemetry,
+	}, nil
 }
 
 // HandleProcessMessage обрабатывает тело сообщения Kafka из темы avatar.process

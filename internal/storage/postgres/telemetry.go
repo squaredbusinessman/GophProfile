@@ -38,19 +38,25 @@ type repositoryOperation struct {
 }
 
 // newPostgresTelemetry создаёт инструменты PostgreSQL для текущего провайдера метрик
-func newPostgresTelemetry() postgresTelemetry {
+func newPostgresTelemetry() (postgresTelemetry, error) {
 	meter := otel.Meter(postgresInstrumentationName)
-	operations, _ := meter.Int64Counter(
+	operations, err := meter.Int64Counter(
 		"db.client.operation.count",
 		metric.WithDescription("Количество завершённых операций PostgreSQL repository"),
 		metric.WithUnit("{operation}"),
 	)
-	duration, _ := meter.Float64Histogram(
+	if err != nil {
+		return postgresTelemetry{}, fmt.Errorf("create PostgreSQL operation counter: %w", err)
+	}
+	duration, err := meter.Float64Histogram(
 		"db.client.operation.duration",
 		metric.WithDescription("Продолжительность операций PostgreSQL repository"),
 		metric.WithUnit("s"),
 	)
-	return postgresTelemetry{operations: operations, duration: duration}
+	if err != nil {
+		return postgresTelemetry{}, fmt.Errorf("create PostgreSQL operation duration histogram: %w", err)
+	}
+	return postgresTelemetry{operations: operations, duration: duration}, nil
 }
 
 // startRepositoryOperation создаёт безопасный span и начинает измерение метода репозитория

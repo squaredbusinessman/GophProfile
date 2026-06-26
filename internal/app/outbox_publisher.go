@@ -24,13 +24,17 @@ type OutboxPublisherService struct {
 }
 
 // NewOutboxPublisherService создаёт сервис повторной публикации событий outbox
-func NewOutboxPublisherService(store OutboxEventStore, publisher EventPublisher) *OutboxPublisherService {
+func NewOutboxPublisherService(store OutboxEventStore, publisher EventPublisher) (*OutboxPublisherService, error) {
+	telemetry, err := newBusinessTelemetry()
+	if err != nil {
+		return nil, fmt.Errorf("create outbox publisher telemetry: %w", err)
+	}
 	return &OutboxPublisherService{
 		store:     store,
 		publisher: publisher,
 		now:       time.Now,
-		telemetry: newBusinessTelemetry(),
-	}
+		telemetry: telemetry,
+	}, nil
 }
 
 // PublishPending публикует ожидающие события outbox и обновляет их состояние
@@ -53,7 +57,9 @@ func (s *OutboxPublisherService) PublishPending(ctx context.Context, limit int) 
 				Str("topic", event.Topic).
 				Str("error_type", ErrorType(err)).
 				Msg("outbox event publish failed")
-			_ = s.store.MarkOutboxPublishAttemptFailed(ctx, event.ID, err, s.now().UTC())
+			if markErr := s.store.MarkOutboxPublishAttemptFailed(ctx, event.ID, err, s.now().UTC()); markErr != nil {
+				logOutboxStateUpdateFailed(ctx, event, "mark_publish_attempt_failed", markErr)
+			}
 			continue
 		}
 		if err := s.store.MarkOutboxPublished(ctx, event.ID, s.now().UTC()); err != nil {

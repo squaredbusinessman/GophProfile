@@ -113,15 +113,19 @@ type AvatarProcessEvent struct {
 }
 
 // NewAvatarUploadService создаёт сервис загрузки аватара
-func NewAvatarUploadService(users UserLookup, avatarOutbox AvatarOutboxStore, objects ObjectStore, publisher EventPublisher) *AvatarUploadService {
+func NewAvatarUploadService(users UserLookup, avatarOutbox AvatarOutboxStore, objects ObjectStore, publisher EventPublisher) (*AvatarUploadService, error) {
+	telemetry, err := newBusinessTelemetry()
+	if err != nil {
+		return nil, fmt.Errorf("create avatar upload telemetry: %w", err)
+	}
 	return &AvatarUploadService{
 		users:        users,
 		avatarOutbox: avatarOutbox,
 		objects:      objects,
 		publisher:    publisher,
 		now:          time.Now,
-		telemetry:    newBusinessTelemetry(),
-	}
+		telemetry:    telemetry,
+	}, nil
 }
 
 // UploadAvatar сохраняет оригинал в S3 и атомарно создаёт аватар с событием outbox
@@ -225,12 +229,15 @@ func (s *AvatarUploadService) UploadAvatar(ctx context.Context, req AvatarUpload
 func (s *AvatarUploadService) publishOutboxEvent(ctx context.Context, event outbox.Event) {
 	if err := s.publisher.Publish(ctx, event.Topic, event.Key, event.Payload, event.Headers); err != nil {
 		s.telemetry.recordOutboxPublish(ctx, outboxPublishModeImmediate, outboxPublishResultError)
-		_ = s.avatarOutbox.MarkOutboxPublishAttemptFailed(ctx, event.ID, err, s.now().UTC())
+		if markErr := s.avatarOutbox.MarkOutboxPublishAttemptFailed(ctx, event.ID, err, s.now().UTC()); markErr != nil {
+			logOutboxStateUpdateFailed(ctx, event, "mark_publish_attempt_failed", markErr)
+		}
 		return
 	}
 
 	if err := s.avatarOutbox.MarkOutboxPublished(ctx, event.ID, s.now().UTC()); err != nil {
 		s.telemetry.recordOutboxPublish(ctx, outboxPublishModeImmediate, outboxPublishResultError)
+		logOutboxStateUpdateFailed(ctx, event, "mark_published", err)
 		return
 	}
 	s.telemetry.recordOutboxPublish(ctx, outboxPublishModeImmediate, outboxPublishResultSuccess)

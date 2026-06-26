@@ -29,7 +29,7 @@ func TestHandleProcessMessageCreatesThumbnailsAndMarksReady(t *testing.T) {
 	objects := &fakeAvatarObjectStore{
 		getBody: processTestPNG(t, 8, 6),
 	}
-	service := NewAvatarProcessService(avatars, objects, &fakeEventPublisher{})
+	service := newAvatarProcessServiceForTest(t, avatars, objects, &fakeEventPublisher{})
 
 	err := service.HandleProcessMessage(context.Background(), []byte(`{"avatar_id":"avatar-1","user_id":"user-1","original_object_key":"avatars/user-1/avatar-1/original","attempt":1}`))
 	if err != nil {
@@ -60,7 +60,7 @@ func TestHandleProcessMessageSkipsReadyAvatar(t *testing.T) {
 		},
 	}
 	objects := &fakeAvatarObjectStore{}
-	service := NewAvatarProcessService(avatars, objects, &fakeEventPublisher{})
+	service := newAvatarProcessServiceForTest(t, avatars, objects, &fakeEventPublisher{})
 
 	err := service.HandleProcessMessage(context.Background(), []byte(`{"avatar_id":"avatar-1","user_id":"user-1","attempt":1}`))
 	if err != nil {
@@ -82,7 +82,7 @@ func TestHandleProcessMessageMarksFailedForDecodeError(t *testing.T) {
 		},
 	}
 	objects := &fakeAvatarObjectStore{getBody: []byte("not-image")}
-	service := NewAvatarProcessService(avatars, objects, &fakeEventPublisher{})
+	service := newAvatarProcessServiceForTest(t, avatars, objects, &fakeEventPublisher{})
 
 	err := service.HandleProcessMessage(context.Background(), []byte(`{"avatar_id":"avatar-1","user_id":"user-1","attempt":1}`))
 	if err != nil {
@@ -105,7 +105,7 @@ func TestHandleProcessMessagePublishesRetryForTemporaryError(t *testing.T) {
 	}
 	objects := &fakeAvatarObjectStore{getErr: errors.New("s3 timeout")}
 	publisher := &fakeEventPublisher{}
-	service := NewAvatarProcessService(avatars, objects, publisher)
+	service := newAvatarProcessServiceForTest(t, avatars, objects, publisher)
 
 	err := service.HandleProcessMessage(context.Background(), []byte(`{"avatar_id":"avatar-1","user_id":"user-1","attempt":1}`))
 	if err != nil {
@@ -128,7 +128,7 @@ func TestHandleProcessMessageDeadLettersAfterAttemptLimit(t *testing.T) {
 	}
 	objects := &fakeAvatarObjectStore{getErr: errors.New("s3 timeout")}
 	publisher := &fakeEventPublisher{}
-	service := NewAvatarProcessService(avatars, objects, publisher)
+	service := newAvatarProcessServiceForTest(t, avatars, objects, publisher)
 
 	err := service.HandleProcessMessage(context.Background(), []byte(`{"avatar_id":"avatar-1","user_id":"user-1","attempt":4}`))
 	if err != nil {

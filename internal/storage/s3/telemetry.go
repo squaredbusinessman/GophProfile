@@ -60,19 +60,25 @@ type observedReadCloser struct {
 }
 
 // newS3Telemetry создаёт инструменты operation result и duration
-func newS3Telemetry() s3Telemetry {
+func newS3Telemetry() (s3Telemetry, error) {
 	meter := otel.Meter(s3InstrumentationName)
-	operations, _ := meter.Int64Counter(
+	operations, err := meter.Int64Counter(
 		"s3.client.operation.count",
 		metric.WithDescription("Количество завершённых S3 operations по результату"),
 		metric.WithUnit("{operation}"),
 	)
-	duration, _ := meter.Float64Histogram(
+	if err != nil {
+		return s3Telemetry{}, fmt.Errorf("create S3 operation counter: %w", err)
+	}
+	duration, err := meter.Float64Histogram(
 		"s3.client.operation.duration",
 		metric.WithDescription("Продолжительность S3 operations"),
 		metric.WithUnit("s"),
 	)
-	return s3Telemetry{operations: operations, duration: duration}
+	if err != nil {
+		return s3Telemetry{}, fmt.Errorf("create S3 operation duration histogram: %w", err)
+	}
+	return s3Telemetry{operations: operations, duration: duration}, nil
 }
 
 // startS3Operation создаёт client span и начинает измерение продолжительности

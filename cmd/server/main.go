@@ -84,18 +84,33 @@ func main() {
 	}
 	defer kafkaClient.Close()
 
-	userRepo := postgres.NewUserRepository(db)
-	outboxRepo := postgres.NewOutboxRepository(db)
-	avatarRepo := postgres.NewAvatarRepository(db)
+	userRepo, err := postgres.NewUserRepository(db)
+	if err != nil {
+		logger.Fatal().Str("error_type", app.ErrorType(err)).Msg("create user repository")
+	}
+	outboxRepo, err := postgres.NewOutboxRepository(db)
+	if err != nil {
+		logger.Fatal().Str("error_type", app.ErrorType(err)).Msg("create outbox repository")
+	}
+	avatarRepo, err := postgres.NewAvatarRepository(db)
+	if err != nil {
+		logger.Fatal().Str("error_type", app.ErrorType(err)).Msg("create avatar repository")
+	}
 	if err := telemetry.RegisterBusinessMetrics(outboxRepo, avatarRepo); err != nil {
 		logger.Fatal().Str("error_type", app.ErrorType(err)).Msg("register business metrics")
 	}
 	userResolveService := app.NewUserResolveService(userRepo)
-	avatarUploadService := app.NewAvatarUploadService(userRepo, outboxRepo, s3Client, kafkaClient)
+	avatarUploadService, err := app.NewAvatarUploadService(userRepo, outboxRepo, s3Client, kafkaClient)
+	if err != nil {
+		logger.Fatal().Str("error_type", app.ErrorType(err)).Msg("create avatar upload service")
+	}
 	avatarReadService := app.NewAvatarReadServiceWithUsers(userRepo, avatarRepo, s3Client)
-	avatarDeleteService := app.NewAvatarDeleteService(avatarRepo, outboxRepo, kafkaClient)
+	avatarDeleteService, err := app.NewAvatarDeleteService(avatarRepo, outboxRepo, kafkaClient)
+	if err != nil {
+		logger.Fatal().Str("error_type", app.ErrorType(err)).Msg("create avatar delete service")
+	}
 
-	router := httpapi.NewRouter(httpapi.RouterConfig{
+	router, err := httpapi.NewRouter(httpapi.RouterConfig{
 		ServiceName:    cfg.ServiceName,
 		Version:        cfg.Version,
 		Logger:         logger,
@@ -113,6 +128,9 @@ func main() {
 		AvatarReader:   avatarReadService,
 		AvatarDeleter:  avatarDeleteService,
 	})
+	if err != nil {
+		logger.Fatal().Str("error_type", app.ErrorType(err)).Msg("create HTTP router")
+	}
 
 	if err := app.RunHTTPServer(ctx, cfg, router, logger); err != nil {
 		if !errors.Is(err, context.Canceled) {

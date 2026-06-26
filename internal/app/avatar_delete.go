@@ -67,24 +67,32 @@ type AvatarDeleteEvent struct {
 }
 
 // NewAvatarDeleteService создаёт сервис удаления аватара через outbox
-func NewAvatarDeleteService(avatars AvatarDeleteRepository, outbox AvatarDeleteOutboxStore, producer EventPublisher) *AvatarDeleteService {
+func NewAvatarDeleteService(avatars AvatarDeleteRepository, outbox AvatarDeleteOutboxStore, producer EventPublisher) (*AvatarDeleteService, error) {
+	telemetry, err := newBusinessTelemetry()
+	if err != nil {
+		return nil, fmt.Errorf("create avatar delete telemetry: %w", err)
+	}
 	return &AvatarDeleteService{
 		avatars:   avatars,
 		outbox:    outbox,
 		producer:  producer,
 		now:       time.Now,
-		telemetry: newBusinessTelemetry(),
-	}
+		telemetry: telemetry,
+	}, nil
 }
 
 // NewAvatarDeleteWorkerService создаёт сервис фонового удаления объектов из S3
-func NewAvatarDeleteWorkerService(avatars AvatarDeleteWorkerRepository, objects AvatarDeleteObjectStore) *AvatarDeleteWorkerService {
+func NewAvatarDeleteWorkerService(avatars AvatarDeleteWorkerRepository, objects AvatarDeleteObjectStore) (*AvatarDeleteWorkerService, error) {
+	telemetry, err := newBusinessTelemetry()
+	if err != nil {
+		return nil, fmt.Errorf("create avatar delete worker telemetry: %w", err)
+	}
 	return &AvatarDeleteWorkerService{
 		avatars:   avatars,
 		objects:   objects,
 		now:       time.Now,
-		telemetry: newBusinessTelemetry(),
-	}
+		telemetry: telemetry,
+	}, nil
 }
 
 // DeleteAvatarByID логически удаляет аватар по идентификатору при совпадении владельца
@@ -223,12 +231,15 @@ func (s *AvatarDeleteService) deleteAvatar(ctx context.Context, item avatar.Avat
 func (s *AvatarDeleteService) publishOutboxEvent(ctx context.Context, event outbox.Event) {
 	if err := s.producer.Publish(ctx, event.Topic, event.Key, event.Payload, event.Headers); err != nil {
 		s.telemetry.recordOutboxPublish(ctx, outboxPublishModeImmediate, outboxPublishResultError)
-		_ = s.outbox.MarkOutboxPublishAttemptFailed(ctx, event.ID, err, s.now().UTC())
+		if markErr := s.outbox.MarkOutboxPublishAttemptFailed(ctx, event.ID, err, s.now().UTC()); markErr != nil {
+			logOutboxStateUpdateFailed(ctx, event, "mark_publish_attempt_failed", markErr)
+		}
 		return
 	}
 
 	if err := s.outbox.MarkOutboxPublished(ctx, event.ID, s.now().UTC()); err != nil {
 		s.telemetry.recordOutboxPublish(ctx, outboxPublishModeImmediate, outboxPublishResultError)
+		logOutboxStateUpdateFailed(ctx, event, "mark_published", err)
 		return
 	}
 	s.telemetry.recordOutboxPublish(ctx, outboxPublishModeImmediate, outboxPublishResultSuccess)

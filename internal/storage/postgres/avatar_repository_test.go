@@ -15,7 +15,7 @@ import (
 // TestReadAvatarOperationalStatsReturnsCountsAndStorage проверяет агрегаты аватаров из БД
 func TestReadAvatarOperationalStatsReturnsCountsAndStorage(t *testing.T) {
 	db, mock := newMockDB(t)
-	repo := NewAvatarRepository(db)
+	repo := newAvatarRepositoryForTest(t, db)
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT status, COUNT(*)")).
 		WillReturnRows(sqlmock.NewRows([]string{"status", "count"}).
 			AddRow(string(avatar.StatusReady), int64(3)).
@@ -37,7 +37,7 @@ func TestReadAvatarOperationalStatsReturnsCountsAndStorage(t *testing.T) {
 // TestCreateAvatarInsertsAllFields проверяет SQL-вставку avatar
 func TestCreateAvatarInsertsAllFields(t *testing.T) {
 	db, mock := newMockDB(t)
-	repo := NewAvatarRepository(db)
+	repo := newAvatarRepositoryForTest(t, db)
 	now := time.Date(2026, 6, 8, 10, 0, 0, 0, time.UTC)
 
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO avatars")).
@@ -80,7 +80,7 @@ func TestCreateAvatarInsertsAllFields(t *testing.T) {
 // TestGetAvatarFiltersSoftDeleted проверяет фильтр soft delete при чтении
 func TestGetAvatarFiltersSoftDeleted(t *testing.T) {
 	db, mock := newMockDB(t)
-	repo := NewAvatarRepository(db)
+	repo := newAvatarRepositoryForTest(t, db)
 	now := time.Date(2026, 6, 8, 10, 0, 0, 0, time.UTC)
 
 	rows := sqlmock.NewRows(avatarColumns()).
@@ -122,7 +122,7 @@ func TestGetAvatarFiltersSoftDeleted(t *testing.T) {
 // TestGetAvatarReturnsNotFound проверяет маппинг отсутствующей строки
 func TestGetAvatarReturnsNotFound(t *testing.T) {
 	db, mock := newMockDB(t)
-	repo := NewAvatarRepository(db)
+	repo := newAvatarRepositoryForTest(t, db)
 
 	mock.ExpectQuery(regexp.QuoteMeta("FROM avatars")).
 		WithArgs("missing-id").
@@ -139,7 +139,7 @@ func TestGetAvatarReturnsNotFound(t *testing.T) {
 // TestListAvatarsByUserFiltersSoftDeleted проверяет список активных avatar по UUID пользователя
 func TestListAvatarsByUserFiltersSoftDeleted(t *testing.T) {
 	db, mock := newMockDB(t)
-	repo := NewAvatarRepository(db)
+	repo := newAvatarRepositoryForTest(t, db)
 	now := time.Date(2026, 6, 8, 10, 0, 0, 0, time.UTC)
 
 	rows := sqlmock.NewRows(avatarColumns()).
@@ -178,7 +178,7 @@ func TestListAvatarsByUserFiltersSoftDeleted(t *testing.T) {
 // TestUpdateAvatarStatusRejectsInvalidStatus проверяет валидацию статуса
 func TestUpdateAvatarStatusRejectsInvalidStatus(t *testing.T) {
 	db, mock := newMockDB(t)
-	repo := NewAvatarRepository(db)
+	repo := newAvatarRepositoryForTest(t, db)
 
 	err := repo.UpdateAvatarStatus(context.Background(), "avatar-id", avatar.Status("unknown"), time.Now())
 	if !errors.Is(err, avatar.ErrInvalidStatus) {
@@ -191,7 +191,7 @@ func TestUpdateAvatarStatusRejectsInvalidStatus(t *testing.T) {
 // TestUpdateAvatarStatusReturnsNotFound проверяет отсутствие активной строки
 func TestUpdateAvatarStatusReturnsNotFound(t *testing.T) {
 	db, mock := newMockDB(t)
-	repo := NewAvatarRepository(db)
+	repo := newAvatarRepositoryForTest(t, db)
 	now := time.Date(2026, 6, 8, 10, 0, 0, 0, time.UTC)
 
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE avatars")).
@@ -209,7 +209,7 @@ func TestUpdateAvatarStatusReturnsNotFound(t *testing.T) {
 // TestSoftDeleteAvatarMarksDeleting проверяет мягкое удаление avatar
 func TestSoftDeleteAvatarMarksDeleting(t *testing.T) {
 	db, mock := newMockDB(t)
-	repo := NewAvatarRepository(db)
+	repo := newAvatarRepositoryForTest(t, db)
 	deletedAt := time.Date(2026, 6, 8, 10, 0, 0, 0, time.UTC)
 
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE avatars")).

@@ -46,7 +46,7 @@ func TestHeaderCarrierInjectExtractRoundTrip(t *testing.T) {
 func TestImmediateAndDelayedPublishKeepTraceID(t *testing.T) {
 	recorder, _, _ := installKafkaTestProviders(t)
 	producer := &fakeProducer{}
-	client := newTestClient(producer, &fakeConsumer{}, "workers")
+	client := newTestClient(t, producer, &fakeConsumer{}, "workers")
 	ctx, root := otel.Tracer("test").Start(context.Background(), "HTTP POST /avatars")
 	traceID := root.SpanContext().TraceID()
 	headers := InjectTraceContext(ctx, map[string]string{"x-custom": "preserved"})
@@ -90,7 +90,7 @@ func TestConsumerHandlerReceivesRemoteParentAndCommits(t *testing.T) {
 		Key:            []byte("secret-key"),
 		Value:          []byte("secret-payload"),
 	}}}
-	client := newTestClient(&fakeProducer{}, consumer, "workers")
+	client := newTestClient(t, &fakeProducer{}, consumer, "workers")
 	consumeCtx, cancel := context.WithCancel(context.Background())
 
 	var handlerContext trace.SpanContext
@@ -127,7 +127,7 @@ func TestHandlerErrorDoesNotCommitOffset(t *testing.T) {
 		Key:            []byte("secret-key"),
 		Value:          []byte("secret-payload"),
 	}}}
-	client := newTestClient(&fakeProducer{}, consumer, "workers")
+	client := newTestClient(t, &fakeProducer{}, consumer, "workers")
 	consumeCtx, cancel := context.WithCancel(context.Background())
 	err := client.Consume(consumeCtx, []string{topic}, func(context.Context, Message) error {
 		cancel()
@@ -163,7 +163,7 @@ func TestRetryPublishPreservesTraceAndUnknownHeaders(t *testing.T) {
 		Headers:        headerCarrierFromMap(headers),
 	}}}
 	producer := &fakeProducer{}
-	client := newTestClient(producer, consumer, "workers")
+	client := newTestClient(t, producer, consumer, "workers")
 	consumeCtx, cancel := context.WithCancel(context.Background())
 
 	err := client.Consume(consumeCtx, []string{topic}, func(ctx context.Context, _ Message) error {
@@ -184,8 +184,13 @@ func TestRetryPublishPreservesTraceAndUnknownHeaders(t *testing.T) {
 }
 
 // newTestClient создаёт тестовый клиент Kafka
-func newTestClient(producer producerAPI, consumer consumerAPI, group string) *Client {
-	return &Client{producer: producer, consumer: consumer, consumerGroup: group, telemetry: newKafkaTelemetry()}
+func newTestClient(t *testing.T, producer producerAPI, consumer consumerAPI, group string) *Client {
+	t.Helper()
+	telemetry, err := newKafkaTelemetry()
+	if err != nil {
+		t.Fatalf("newKafkaTelemetry() error = %v", err)
+	}
+	return &Client{producer: producer, consumer: consumer, consumerGroup: group, telemetry: telemetry}
 }
 
 // fakeProducer синхронно возвращает отчёт об успешной доставке

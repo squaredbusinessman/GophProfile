@@ -26,7 +26,7 @@ func TestPublishPendingOutboxCreatesWorkerSpan(t *testing.T) {
 		otel.SetTracerProvider(previous)
 	})
 
-	service := NewOutboxPublisherService(&fakeOutboxEventStore{events: []outbox.Event{}}, &fakeEventPublisher{})
+	service := newOutboxPublisherServiceForTest(t, &fakeOutboxEventStore{events: []outbox.Event{}}, &fakeEventPublisher{})
 	publishPendingOutbox(context.Background(), config.Config{Worker: config.WorkerConfig{OutboxBatchSize: 10}}, service)
 
 	spans := recorder.Ended()

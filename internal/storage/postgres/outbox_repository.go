@@ -36,8 +36,12 @@ func (r *OutboxRepository) ReadOutboxOperationalStats(ctx context.Context) (pend
 }
 
 // NewOutboxRepository создаёт репозиторий событий outbox
-func NewOutboxRepository(db *sql.DB) *OutboxRepository {
-	return &OutboxRepository{db: db, telemetry: newPostgresTelemetry()}
+func NewOutboxRepository(db *sql.DB) (*OutboxRepository, error) {
+	telemetry, err := newPostgresTelemetry()
+	if err != nil {
+		return nil, fmt.Errorf("create outbox repository telemetry: %w", err)
+	}
+	return &OutboxRepository{db: db, telemetry: telemetry}, nil
 }
 
 // CreateAvatarWithOutbox атомарно сохраняет аватар и событие outbox

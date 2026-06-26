@@ -45,12 +45,21 @@ type kafkaOperation struct {
 }
 
 // newKafkaTelemetry создаёт инструменты метрик операций Kafka
-func newKafkaTelemetry() kafkaTelemetry {
+func newKafkaTelemetry() (kafkaTelemetry, error) {
 	meter := otel.Meter(kafkaInstrumentationName)
-	operations, _ := meter.Int64Counter("messaging.client.operation.count", metric.WithDescription("Количество операций Kafka по результату"), metric.WithUnit("{operation}"))
-	clientDuration, _ := meter.Float64Histogram("messaging.client.operation.duration", metric.WithDescription("Продолжительность клиентских операций Kafka"), metric.WithUnit("s"))
-	processDuration, _ := meter.Float64Histogram("messaging.process.duration", metric.WithDescription("Продолжительность обработки сообщений Kafka"), metric.WithUnit("s"))
-	return kafkaTelemetry{operations: operations, clientDuration: clientDuration, processDuration: processDuration}
+	operations, err := meter.Int64Counter("messaging.client.operation.count", metric.WithDescription("Количество операций Kafka по результату"), metric.WithUnit("{operation}"))
+	if err != nil {
+		return kafkaTelemetry{}, fmt.Errorf("create Kafka operation counter: %w", err)
+	}
+	clientDuration, err := meter.Float64Histogram("messaging.client.operation.duration", metric.WithDescription("Продолжительность клиентских операций Kafka"), metric.WithUnit("s"))
+	if err != nil {
+		return kafkaTelemetry{}, fmt.Errorf("create Kafka client duration histogram: %w", err)
+	}
+	processDuration, err := meter.Float64Histogram("messaging.process.duration", metric.WithDescription("Продолжительность обработки сообщений Kafka"), metric.WithUnit("s"))
+	if err != nil {
+		return kafkaTelemetry{}, fmt.Errorf("create Kafka process duration histogram: %w", err)
+	}
+	return kafkaTelemetry{operations: operations, clientDuration: clientDuration, processDuration: processDuration}, nil
 }
 
 // startOperation создаёт span Kafka с низкокардинальными атрибутами
