@@ -12,10 +12,29 @@ import (
 	"github.com/squaredbusinessman/GophProfile/internal/domain/outbox"
 )
 
+// TestReadOutboxOperationalStatsReturnsPersistentBacklog проверяет агрегаты outbox из БД
+func TestReadOutboxOperationalStatsReturnsPersistentBacklog(t *testing.T) {
+	db, mock := newMockDB(t)
+	repo := newOutboxRepositoryForTest(t, db)
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT\n\t\t\tCOUNT(*),")).
+		WithArgs(string(outbox.StatusPending)).
+		WillReturnRows(sqlmock.NewRows([]string{"count", "oldest_age"}).AddRow(int64(5), 37.5))
+
+	pendingCount, oldestAgeSeconds, err := repo.ReadOutboxOperationalStats(context.Background())
+	if err != nil {
+		t.Fatalf("ReadOutboxOperationalStats() error = %v", err)
+	}
+	if pendingCount != 5 || oldestAgeSeconds != 37.5 {
+		t.Fatalf("outbox stats = count %d age %f", pendingCount, oldestAgeSeconds)
+	}
+	assertExpectations(t, mock)
+}
+
 // TestCreateAvatarWithOutboxWritesBothRecordsInTransaction проверяет атомарную запись avatar и outbox
 func TestCreateAvatarWithOutboxWritesBothRecordsInTransaction(t *testing.T) {
+	recorder := installPostgresSpanRecorder(t)
 	db, mock := newMockDB(t)
-	repo := NewOutboxRepository(db)
+	repo := newOutboxRepositoryForTest(t, db)
 	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
 
 	mock.ExpectBegin()
@@ -43,6 +62,7 @@ func TestCreateAvatarWithOutboxWritesBothRecordsInTransaction(t *testing.T) {
 			"avatar.process.v1",
 			"4a992fa3-df1a-4b5f-b764-546e99643eb0",
 			[]byte(`{"avatar_id":"4a992fa3-df1a-4b5f-b764-546e99643eb0"}`),
+			[]byte(`{"traceparent":"00-11111111111111111111111111111111-2222222222222222-01"}`),
 			string(outbox.StatusPending),
 			0,
 			sql.NullString{},
@@ -68,10 +88,13 @@ func TestCreateAvatarWithOutboxWritesBothRecordsInTransaction(t *testing.T) {
 		CreatedAt:         now,
 		UpdatedAt:         now,
 	}, outbox.Event{
-		ID:        "7e9b73db-f6d6-466d-aaee-34d4e9e76615",
-		Topic:     "avatar.process.v1",
-		Key:       "4a992fa3-df1a-4b5f-b764-546e99643eb0",
-		Payload:   []byte(`{"avatar_id":"4a992fa3-df1a-4b5f-b764-546e99643eb0"}`),
+		ID:      "7e9b73db-f6d6-466d-aaee-34d4e9e76615",
+		Topic:   "avatar.process.v1",
+		Key:     "4a992fa3-df1a-4b5f-b764-546e99643eb0",
+		Payload: []byte(`{"avatar_id":"4a992fa3-df1a-4b5f-b764-546e99643eb0"}`),
+		Headers: map[string]string{
+			"traceparent": "00-11111111111111111111111111111111-2222222222222222-01",
+		},
 		Status:    outbox.StatusPending,
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -81,12 +104,45 @@ func TestCreateAvatarWithOutboxWritesBothRecordsInTransaction(t *testing.T) {
 	}
 
 	assertExpectations(t, mock)
+	spans := recorder.Ended()
+	if len(spans) != 1 {
+		t.Fatalf("ended spans = %d, want 1", len(spans))
+	}
+	names := eventNames(spans[0].Events())
+	if !names["db.transaction.begin"] || !names["db.transaction.commit"] || names["db.transaction.rollback"] {
+		t.Fatalf("unexpected transaction events: %v", names)
+	}
+}
+
+// TestCreateAvatarWithOutboxRecordsRollback проверяет событие rollback при отмене транзакции
+func TestCreateAvatarWithOutboxRecordsRollback(t *testing.T) {
+	recorder := installPostgresSpanRecorder(t)
+	db, mock := newMockDB(t)
+	repo := newOutboxRepositoryForTest(t, db)
+
+	mock.ExpectBegin()
+	mock.ExpectRollback()
+
+	err := repo.CreateAvatarWithOutbox(context.Background(), avatar.Avatar{Status: avatar.Status("invalid")}, outbox.Event{})
+	if err == nil {
+		t.Fatal("CreateAvatarWithOutbox() error = nil")
+	}
+	assertExpectations(t, mock)
+
+	spans := recorder.Ended()
+	if len(spans) != 1 {
+		t.Fatalf("ended spans = %d, want 1", len(spans))
+	}
+	names := eventNames(spans[0].Events())
+	if !names["db.transaction.begin"] || !names["db.transaction.rollback"] || names["db.transaction.commit"] {
+		t.Fatalf("unexpected transaction events: %v", names)
+	}
 }
 
 // TestSoftDeleteAvatarWithOutboxWritesBothRecordsInTransaction проверяет атомарный soft delete и outbox
 func TestSoftDeleteAvatarWithOutboxWritesBothRecordsInTransaction(t *testing.T) {
 	db, mock := newMockDB(t)
-	repo := NewOutboxRepository(db)
+	repo := newOutboxRepositoryForTest(t, db)
 	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
 
 	mock.ExpectBegin()
@@ -104,6 +160,7 @@ func TestSoftDeleteAvatarWithOutboxWritesBothRecordsInTransaction(t *testing.T) 
 			"avatar.delete.v1",
 			"4a992fa3-df1a-4b5f-b764-546e99643eb0",
 			[]byte(`{"avatar_id":"4a992fa3-df1a-4b5f-b764-546e99643eb0"}`),
+			[]byte(`{}`),
 			string(outbox.StatusPending),
 			0,
 			sql.NullString{},
@@ -135,10 +192,45 @@ func TestSoftDeleteAvatarWithOutboxWritesBothRecordsInTransaction(t *testing.T) 
 	assertExpectations(t, mock)
 }
 
+// TestListPendingOutboxEventsRestoresHeaders проверяет чтение сохранённого carrier
+func TestListPendingOutboxEventsRestoresHeaders(t *testing.T) {
+	db, mock := newMockDB(t)
+	repo := newOutboxRepositoryForTest(t, db)
+	now := time.Date(2026, 6, 20, 10, 0, 0, 0, time.UTC)
+	columns := []string{
+		"id", "topic", "event_key", "payload", "headers", "status", "attempts",
+		"last_error", "created_at", "updated_at", "published_at",
+	}
+	mock.ExpectQuery(regexp.QuoteMeta("FROM outbox_events")).
+		WithArgs(string(outbox.StatusPending), 10).
+		WillReturnRows(sqlmock.NewRows(columns).AddRow(
+			"event-id",
+			"avatar.process.v1",
+			"avatar-id",
+			[]byte(`{"avatar_id":"avatar-id"}`),
+			[]byte(`{"traceparent":"00-11111111111111111111111111111111-2222222222222222-01","x-custom":"preserved"}`),
+			string(outbox.StatusPending),
+			0,
+			nil,
+			now,
+			now,
+			nil,
+		))
+
+	events, err := repo.ListPendingOutboxEvents(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("ListPendingOutboxEvents() error = %v", err)
+	}
+	if len(events) != 1 || events[0].Headers["x-custom"] != "preserved" || events[0].Headers["traceparent"] == "" {
+		t.Fatalf("restored headers = %#v", events)
+	}
+	assertExpectations(t, mock)
+}
+
 // TestMarkOutboxPublishedUpdatesPendingEvent проверяет отметку успешной публикации
 func TestMarkOutboxPublishedUpdatesPendingEvent(t *testing.T) {
 	db, mock := newMockDB(t)
-	repo := NewOutboxRepository(db)
+	repo := newOutboxRepositoryForTest(t, db)
 	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
 
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE outbox_events")).
@@ -155,7 +247,7 @@ func TestMarkOutboxPublishedUpdatesPendingEvent(t *testing.T) {
 // TestMarkOutboxPublishAttemptFailedKeepsEventPending проверяет запись ошибки публикации
 func TestMarkOutboxPublishAttemptFailedKeepsEventPending(t *testing.T) {
 	db, mock := newMockDB(t)
-	repo := NewOutboxRepository(db)
+	repo := newOutboxRepositoryForTest(t, db)
 	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
 
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE outbox_events")).
@@ -172,7 +264,7 @@ func TestMarkOutboxPublishAttemptFailedKeepsEventPending(t *testing.T) {
 
 type assertError string
 
-// Error возвращает текст fake-ошибки
+// Error возвращает текст тестовой ошибки
 func (e assertError) Error() string {
 	return string(e)
 }

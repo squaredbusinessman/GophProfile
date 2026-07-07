@@ -1,3 +1,4 @@
+// Package config загружает и проверяет конфигурацию приложения
 package config
 
 import (
@@ -17,63 +18,130 @@ const (
 	defaultCORSAllowedOrigins = "http://localhost:3000,http://localhost:5173"
 )
 
+// Config содержит полную конфигурацию приложения
 type Config struct {
+	// ServiceName задаёт имя бизнес-сервиса
 	ServiceName string
-	Version     string
-	Env         string
-	LogLevel    string
-	HTTP        HTTPConfig
-	Postgres    PostgresConfig
-	S3          S3Config
-	Kafka       KafkaConfig
-	Worker      WorkerConfig
-	Vault       VaultConfig
+	// Version задаёт версию сборки приложения
+	Version string
+	// Env задаёт окружение развёртывания
+	Env string
+	// Observability содержит настройки телеметрии и логирования
+	Observability ObservabilityConfig
+	// HTTP содержит настройки HTTP-сервера
+	HTTP HTTPConfig
+	// Postgres содержит настройки PostgreSQL
+	Postgres PostgresConfig
+	// S3 содержит настройки объектного хранилища
+	S3 S3Config
+	// Kafka содержит настройки брокера сообщений
+	Kafka KafkaConfig
+	// Worker содержит настройки фонового процесса
+	Worker WorkerConfig
+	// Vault содержит настройки защищённого хранилища секретов
+	Vault VaultConfig
 }
 
+// ObservabilityConfig содержит настройки трассировки, метрик и логирования
+type ObservabilityConfig struct {
+	// Enabled включает экспорт телеметрии
+	Enabled bool
+	// ServiceName задаёт имя сервиса в атрибутах OpenTelemetry
+	ServiceName string
+	// OTLPEndpoint задаёт адрес OTLP-приёмника трассировок
+	OTLPEndpoint string
+	// OTLPInsecure разрешает подключение к OTLP-приёмнику без TLS
+	OTLPInsecure bool
+	// TracesSampler задаёт стратегию семплирования трассировок
+	TracesSampler string
+	// TracesSamplerArg задаёт долю трассировок для вероятностного семплирования
+	TracesSamplerArg float64
+	// MetricsAddr задаёт адрес отдельного HTTP-сервера метрик
+	MetricsAddr string
+	// LogLevel задаёт минимальный уровень логирования
+	LogLevel string
+	// LogFormat задаёт формат логов
+	LogFormat string
+}
+
+// HTTPConfig содержит настройки HTTP-сервера приложения
 type HTTPConfig struct {
-	Addr               string
-	ReadTimeout        time.Duration
-	WriteTimeout       time.Duration
-	IdleTimeout        time.Duration
-	ShutdownTimeout    time.Duration
-	DefaultAvatarPath  string
+	// Addr задаёт адрес HTTP-сервера
+	Addr string
+	// ReadTimeout ограничивает чтение HTTP-запроса
+	ReadTimeout time.Duration
+	// WriteTimeout ограничивает запись HTTP-ответа
+	WriteTimeout time.Duration
+	// IdleTimeout ограничивает время простоя соединения
+	IdleTimeout time.Duration
+	// ShutdownTimeout ограничивает корректную остановку сервера
+	ShutdownTimeout time.Duration
+	// DefaultAvatarPath задаёт путь к изображению по умолчанию
+	DefaultAvatarPath string
+	// CORSAllowedOrigins содержит разрешённые источники CORS
 	CORSAllowedOrigins []string
-	RateLimitRPS       int
-	RateLimitBurst     int
+	// RateLimitRPS задаёт допустимое число запросов в секунду
+	RateLimitRPS int
+	// RateLimitBurst задаёт размер кратковременного всплеска запросов
+	RateLimitBurst int
 }
 
+// PostgresConfig содержит настройки подключения к PostgreSQL
 type PostgresConfig struct {
+	// DSN задаёт строку подключения к PostgreSQL
 	DSN string
 }
 
+// S3Config содержит настройки подключения к S3-совместимому хранилищу
 type S3Config struct {
-	Endpoint     string
-	Bucket       string
-	AccessKey    string
-	SecretKey    string
+	// Endpoint задаёт адрес объектного хранилища
+	Endpoint string
+	// Bucket задаёт имя контейнера для аватаров
+	Bucket string
+	// AccessKey задаёт идентификатор доступа
+	AccessKey string
+	// SecretKey задаёт секретный ключ доступа
+	SecretKey string
+	// UsePathStyle включает адресацию bucket через путь
 	UsePathStyle bool
-	Region       string
+	// Region задаёт регион объектного хранилища
+	Region string
 }
 
+// KafkaConfig содержит настройки подключения к Kafka
 type KafkaConfig struct {
-	Brokers       []string
-	ClientID      string
+	// Brokers содержит адреса брокеров Kafka
+	Brokers []string
+	// ClientID задаёт идентификатор клиента Kafka
+	ClientID string
+	// ConsumerGroup задаёт группу потребителей Kafka
 	ConsumerGroup string
 }
 
+// WorkerConfig содержит настройки фонового процесса
 type WorkerConfig struct {
-	ShutdownTimeout    time.Duration
+	// ShutdownTimeout ограничивает корректную остановку фонового процесса
+	ShutdownTimeout time.Duration
+	// OutboxPollInterval задаёт интервал опроса исходящих событий
 	OutboxPollInterval time.Duration
-	OutboxBatchSize    int
+	// OutboxBatchSize задаёт максимальный размер пакета исходящих событий
+	OutboxBatchSize int
 }
 
+// VaultConfig содержит настройки подключения к Vault
 type VaultConfig struct {
-	Addr        string
-	Token       string
-	Mount       string
+	// Addr задаёт адрес Vault
+	Addr string
+	// Token задаёт токен доступа к Vault
+	Token string
+	// Mount задаёт имя KV mount в Vault
+	Mount string
+	// ServicePath задаёт путь к секретам сервиса
 	ServicePath string
-	Enabled     bool
-	Timeout     time.Duration
+	// Enabled включает загрузку секретов из Vault
+	Enabled bool
+	// Timeout ограничивает запрос к Vault
+	Timeout time.Duration
 }
 
 // ApplySecrets применяет секреты из защищенного хранилища к конфигурации
@@ -109,11 +177,40 @@ func (c *Config) ApplySecrets(secrets map[string]string) {
 
 // Load читает конфигурацию приложения из переменных окружения
 func Load() Config {
+	return load("")
+}
+
+// LoadForProcess читает конфигурацию с разными настройками наблюдаемости для серверного и фонового процессов
+func LoadForProcess(process string) Config {
+	return load(strings.ToLower(strings.TrimSpace(process)))
+}
+
+// load читает конфигурацию с настройками для указанного процесса
+func load(process string) Config {
+	observabilityServiceName := defaultServiceName
+	metricsAddr := ":9090"
+	if process != "" {
+		observabilityServiceName += "-" + process
+	}
+	if process == "worker" {
+		metricsAddr = ":9091"
+	}
+
 	return Config{
 		ServiceName: envString("SERVICE_NAME", defaultServiceName),
 		Version:     envString("APP_VERSION", defaultVersion),
 		Env:         envString("APP_ENV", defaultEnv),
-		LogLevel:    envString("LOG_LEVEL", "debug"),
+		Observability: ObservabilityConfig{
+			Enabled:          envBool("OTEL_ENABLED", false),
+			ServiceName:      envString("OTEL_SERVICE_NAME", observabilityServiceName),
+			OTLPEndpoint:     envString("OTEL_EXPORTER_OTLP_ENDPOINT", "localhost:4317"),
+			OTLPInsecure:     envBool("OTEL_EXPORTER_OTLP_INSECURE", true),
+			TracesSampler:    envString("OTEL_TRACES_SAMPLER", "parentbased_always_on"),
+			TracesSamplerArg: envFloat("OTEL_TRACES_SAMPLER_ARG", 1),
+			MetricsAddr:      envString("METRICS_ADDR", metricsAddr),
+			LogLevel:         envString("LOG_LEVEL", "info"),
+			LogFormat:        envString("LOG_FORMAT", "json"),
+		},
 		HTTP: HTTPConfig{
 			Addr:               envString("HTTP_ADDR", defaultHTTPAddr),
 			ReadTimeout:        envDuration("HTTP_READ_TIMEOUT", 10*time.Second),
@@ -157,7 +254,21 @@ func Load() Config {
 	}
 }
 
-// envString возвращает строковое значение переменной окружения или дефолт
+// envFloat возвращает число с плавающей точкой из переменной окружения или значение по умолчанию
+func envFloat(key string, fallback float64) float64 {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil || parsed < 0 || parsed > 1 {
+		return fallback
+	}
+	return parsed
+}
+
+// envString возвращает строковое значение переменной окружения или значение по умолчанию
 func envString(key string, fallback string) string {
 	value := strings.TrimSpace(os.Getenv(key))
 	if value == "" {
@@ -166,7 +277,7 @@ func envString(key string, fallback string) string {
 	return value
 }
 
-// envDuration возвращает duration из переменной окружения или дефолт
+// envDuration возвращает длительность из переменной окружения или значение по умолчанию
 func envDuration(key string, fallback time.Duration) time.Duration {
 	value := strings.TrimSpace(os.Getenv(key))
 	if value == "" {
@@ -180,7 +291,7 @@ func envDuration(key string, fallback time.Duration) time.Duration {
 	return duration
 }
 
-// envInt возвращает int из переменной окружения или дефолт
+// envInt возвращает целое число из переменной окружения или значение по умолчанию
 func envInt(key string, fallback int) int {
 	value := strings.TrimSpace(os.Getenv(key))
 	if value == "" {
@@ -194,7 +305,7 @@ func envInt(key string, fallback int) int {
 	return parsed
 }
 
-// envBool возвращает boolean из переменной окружения или дефолт
+// envBool возвращает логическое значение из переменной окружения или значение по умолчанию
 func envBool(key string, fallback bool) bool {
 	value := strings.TrimSpace(os.Getenv(key))
 	if value == "" {
@@ -208,7 +319,7 @@ func envBool(key string, fallback bool) bool {
 	return parsed
 }
 
-// envCSV возвращает список строк из CSV-переменной окружения или дефолт
+// envCSV возвращает список строк из CSV-переменной окружения или значение по умолчанию
 func envCSV(key string, fallback []string) []string {
 	value := strings.TrimSpace(os.Getenv(key))
 	if value == "" {

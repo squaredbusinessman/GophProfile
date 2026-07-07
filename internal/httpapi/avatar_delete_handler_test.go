@@ -15,7 +15,7 @@ const testUserID = "6f3f3c2d-df58-4e64-91ea-cdf90f4c9c1e"
 // TestAvatarDeleteByIDReturnsNoContent проверяет успешное удаление avatar по id
 func TestAvatarDeleteByIDReturnsNoContent(t *testing.T) {
 	deleter := &fakeAvatarDeleter{}
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		ServiceName:   "gophprofile",
 		Version:       "test",
 		Logger:        zerolog.Nop(),
@@ -39,7 +39,7 @@ func TestAvatarDeleteByIDReturnsNoContent(t *testing.T) {
 // TestAvatarDeleteRejectsForeignOwner проверяет 403 для чужой avatar
 func TestAvatarDeleteRejectsForeignOwner(t *testing.T) {
 	deleter := &fakeAvatarDeleter{err: app.ErrAvatarForbidden}
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		ServiceName:   "gophprofile",
 		Version:       "test",
 		Logger:        zerolog.Nop(),
@@ -59,7 +59,7 @@ func TestAvatarDeleteRejectsForeignOwner(t *testing.T) {
 
 // TestAvatarDeleteRequiresUserID проверяет обязательный X-User-ID для удаления
 func TestAvatarDeleteRequiresUserID(t *testing.T) {
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		ServiceName:   "gophprofile",
 		Version:       "test",
 		Logger:        zerolog.Nop(),
@@ -79,7 +79,7 @@ func TestAvatarDeleteRequiresUserID(t *testing.T) {
 // TestLatestAvatarDeleteByUserReturnsNoContent проверяет удаление последней avatar пользователя
 func TestLatestAvatarDeleteByUserReturnsNoContent(t *testing.T) {
 	deleter := &fakeAvatarDeleter{}
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		ServiceName:   "gophprofile",
 		Version:       "test",
 		Logger:        zerolog.Nop(),
@@ -102,7 +102,7 @@ func TestLatestAvatarDeleteByUserReturnsNoContent(t *testing.T) {
 
 // TestAvatarMetadataRejectsDeleteMethod проверяет запрет DELETE для metadata route
 func TestAvatarMetadataRejectsDeleteMethod(t *testing.T) {
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		ServiceName:   "gophprofile",
 		Version:       "test",
 		Logger:        zerolog.Nop(),

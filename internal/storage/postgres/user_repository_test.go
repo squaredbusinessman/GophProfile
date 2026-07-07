@@ -15,7 +15,7 @@ import (
 // TestCreateUserInsertsAllFields проверяет SQL-вставку пользователя
 func TestCreateUserInsertsAllFields(t *testing.T) {
 	db, mock := newMockDB(t)
-	repo := NewUserRepository(db)
+	repo := newUserRepositoryForTest(t, db)
 	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
 
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO users")).
@@ -44,7 +44,7 @@ func TestCreateUserInsertsAllFields(t *testing.T) {
 // TestGetUserByEmailReturnsActiveUser проверяет поиск пользователя по email
 func TestGetUserByEmailReturnsActiveUser(t *testing.T) {
 	db, mock := newMockDB(t)
-	repo := NewUserRepository(db)
+	repo := newUserRepositoryForTest(t, db)
 	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
 
 	rows := sqlmock.NewRows(userColumns()).
@@ -74,7 +74,7 @@ func TestGetUserByEmailReturnsActiveUser(t *testing.T) {
 // TestGetUserByEmailReturnsNotFound проверяет маппинг отсутствующего пользователя
 func TestGetUserByEmailReturnsNotFound(t *testing.T) {
 	db, mock := newMockDB(t)
-	repo := NewUserRepository(db)
+	repo := newUserRepositoryForTest(t, db)
 
 	mock.ExpectQuery(regexp.QuoteMeta("FROM users")).
 		WithArgs("missing@example.com").
@@ -91,7 +91,7 @@ func TestGetUserByEmailReturnsNotFound(t *testing.T) {
 // TestFindOrCreateUserByEmailReturnsUser проверяет idempotent upsert пользователя
 func TestFindOrCreateUserByEmailReturnsUser(t *testing.T) {
 	db, mock := newMockDB(t)
-	repo := NewUserRepository(db)
+	repo := newUserRepositoryForTest(t, db)
 	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
 
 	rows := sqlmock.NewRows(userColumns()).

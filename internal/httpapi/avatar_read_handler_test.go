@@ -25,7 +25,7 @@ func TestAvatarReadByIDReturnsBinary(t *testing.T) {
 			Size:        5,
 		},
 	}
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		ServiceName:  "gophprofile",
 		Version:      "test",
 		Logger:       zerolog.Nop(),
@@ -60,7 +60,7 @@ func TestAvatarReadByIDReturnsBinary(t *testing.T) {
 // TestAvatarReadByUserReturnsProcessing проверяет 409 для неготовой thumbnail
 func TestAvatarReadByUserReturnsProcessing(t *testing.T) {
 	reader := &fakeAvatarReader{err: app.ErrAvatarProcessing}
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		ServiceName:  "gophprofile",
 		Version:      "test",
 		Logger:       zerolog.Nop(),
@@ -84,7 +84,7 @@ func TestAvatarReadByUserReturnsProcessing(t *testing.T) {
 func TestAvatarReadByUserReturnsDefaultForMissingAvatar(t *testing.T) {
 	defaultAvatar := NewDefaultAvatar([]byte("default-image"))
 	reader := &fakeAvatarReader{err: app.ErrAvatarNotFound}
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		ServiceName:   "gophprofile",
 		Version:       "test",
 		Logger:        zerolog.Nop(),
@@ -117,7 +117,7 @@ func TestAvatarReadByUserReturnsDefaultForMissingAvatar(t *testing.T) {
 // TestAvatarReadRejectsUnsupportedFormat проверяет 400 для неподдержанной конвертации
 func TestAvatarReadRejectsUnsupportedFormat(t *testing.T) {
 	reader := &fakeAvatarReader{err: app.ErrUnsupportedAvatarFormat}
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		ServiceName:  "gophprofile",
 		Version:      "test",
 		Logger:       zerolog.Nop(),
@@ -137,7 +137,7 @@ func TestAvatarReadRejectsUnsupportedFormat(t *testing.T) {
 // TestAvatarReadReturnsNotFound проверяет 404 для отсутствующей avatar
 func TestAvatarReadReturnsNotFound(t *testing.T) {
 	reader := &fakeAvatarReader{err: app.ErrAvatarNotFound}
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		ServiceName:  "gophprofile",
 		Version:      "test",
 		Logger:       zerolog.Nop(),
@@ -163,7 +163,7 @@ func TestPublicAvatarByEmailReturnsBinary(t *testing.T) {
 			Size:        5,
 		},
 	}
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		ServiceName:  "gophprofile",
 		Version:      "test",
 		Logger:       zerolog.Nop(),
@@ -190,7 +190,7 @@ func TestPublicAvatarByEmailReturnsBinary(t *testing.T) {
 func TestPublicAvatarByEmailReturnsDefaultForMissingUser(t *testing.T) {
 	defaultAvatar := NewDefaultAvatar([]byte("default-image"))
 	reader := &fakeAvatarReader{err: app.ErrAvatarNotFound}
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		ServiceName:   "gophprofile",
 		Version:       "test",
 		Logger:        zerolog.Nop(),
@@ -219,7 +219,7 @@ func TestPublicAvatarByEmailReturnsDefaultForMissingUser(t *testing.T) {
 
 // TestPublicAvatarByEmailRequiresEmail проверяет обязательный email query
 func TestPublicAvatarByEmailRequiresEmail(t *testing.T) {
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		ServiceName:  "gophprofile",
 		Version:      "test",
 		Logger:       zerolog.Nop(),
@@ -262,7 +262,7 @@ func TestAvatarMetadataReturnsReadyJSON(t *testing.T) {
 			},
 		},
 	}
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		ServiceName:  "gophprofile",
 		Version:      "test",
 		Logger:       zerolog.Nop(),
@@ -319,7 +319,7 @@ func TestAvatarMetadataReflectsNonReadyStates(t *testing.T) {
 					},
 				},
 			}
-			handler := NewRouter(RouterConfig{
+			handler := newRouterForTest(t, RouterConfig{
 				ServiceName:  "gophprofile",
 				Version:      "test",
 				Logger:       zerolog.Nop(),
@@ -380,7 +380,7 @@ func TestUserAvatarListReturnsPagination(t *testing.T) {
 			},
 		},
 	}
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		ServiceName:  "gophprofile",
 		Version:      "test",
 		Logger:       zerolog.Nop(),

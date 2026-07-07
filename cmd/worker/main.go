@@ -1,3 +1,4 @@
+// Package main запускает фоновый обработчик приложения
 package main
 
 import (
@@ -11,6 +12,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/squaredbusinessman/GophProfile/internal/app"
+	"github.com/squaredbusinessman/GophProfile/internal/observability"
 	queuekafka "github.com/squaredbusinessman/GophProfile/internal/queue/kafka"
 	"github.com/squaredbusinessman/GophProfile/internal/storage/postgres"
 	storages3 "github.com/squaredbusinessman/GophProfile/internal/storage/s3"
@@ -20,7 +22,7 @@ import (
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 
-	cfg, err := app.LoadConfig(ctx)
+	cfg, err := app.LoadConfigForProcess(ctx, "worker")
 	if err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "load config: %v\n", err)
 		stop()
@@ -29,10 +31,33 @@ func main() {
 	defer stop()
 
 	logger := app.NewLogger(cfg)
+	ctx = app.ContextWithLogger(ctx, logger)
+	telemetry, err := observability.NewTelemetry(ctx, cfg)
+	if err != nil {
+		logger.Fatal().Str("error_type", app.ErrorType(err)).Msg("initialize telemetry")
+	}
+	if err := telemetry.StartMetricsServer(cfg.Observability.MetricsAddr); err != nil {
+		logger.Fatal().Str("error_type", app.ErrorType(err)).Msg("start metrics server")
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.Worker.ShutdownTimeout)
+		defer cancel()
+		if err := telemetry.Shutdown(shutdownCtx); err != nil {
+			logger.Error().Str("error_type", app.ErrorType(err)).Msg("shutdown telemetry")
+		}
+	}()
+	logger.Info().
+		Bool("otel_enabled", cfg.Observability.Enabled).
+		Str("otel_service", cfg.Observability.ServiceName).
+		Str("metrics_addr", cfg.Observability.MetricsAddr).
+		Msg("telemetry initialized")
 
 	db, err := sql.Open("pgx", cfg.Postgres.DSN)
 	if err != nil {
-		logger.Fatal().Err(err).Msg("open postgres connection pool")
+		logger.Fatal().Str("error_type", app.ErrorType(err)).Msg("open postgres connection pool")
+	}
+	if err := telemetry.RegisterDBPool(db, "postgres"); err != nil {
+		logger.Fatal().Str("error_type", app.ErrorType(err)).Msg("register postgres pool metrics")
 	}
 	defer func() {
 		_ = db.Close()
@@ -40,27 +65,45 @@ func main() {
 
 	kafkaClient, err := queuekafka.NewClient(cfg.Kafka.Brokers, cfg.Kafka.ClientID, cfg.Kafka.ConsumerGroup)
 	if err != nil {
-		logger.Fatal().Err(err).Msg("create kafka client")
+		logger.Fatal().Str("error_type", app.ErrorType(err)).Msg("create kafka client")
 	}
 	defer kafkaClient.Close()
 
 	s3Client, err := storages3.NewClient(cfg.S3)
 	if err != nil {
-		logger.Fatal().Err(err).Msg("create s3 client")
+		logger.Fatal().Str("error_type", app.ErrorType(err)).Msg("create s3 client")
 	}
 	if err := app.EnsureLocalS3Bucket(ctx, cfg, s3Client); err != nil {
-		logger.Fatal().Err(err).Msg("ensure local s3 bucket")
+		logger.Fatal().Str("error_type", app.ErrorType(err)).Msg("ensure local s3 bucket")
 	}
 
-	avatarRepo := postgres.NewAvatarRepository(db)
-	outboxRepo := postgres.NewOutboxRepository(db)
-	outboxPublisher := app.NewOutboxPublisherService(outboxRepo, kafkaClient)
-	avatarProcessor := app.NewAvatarProcessService(avatarRepo, s3Client, kafkaClient)
-	avatarDeleter := app.NewAvatarDeleteWorkerService(avatarRepo, s3Client)
+	avatarRepo, err := postgres.NewAvatarRepository(db)
+	if err != nil {
+		logger.Fatal().Str("error_type", app.ErrorType(err)).Msg("create avatar repository")
+	}
+	outboxRepo, err := postgres.NewOutboxRepository(db)
+	if err != nil {
+		logger.Fatal().Str("error_type", app.ErrorType(err)).Msg("create outbox repository")
+	}
+	if err := telemetry.RegisterBusinessMetrics(outboxRepo, avatarRepo); err != nil {
+		logger.Fatal().Str("error_type", app.ErrorType(err)).Msg("register business metrics")
+	}
+	outboxPublisher, err := app.NewOutboxPublisherService(outboxRepo, kafkaClient)
+	if err != nil {
+		logger.Fatal().Str("error_type", app.ErrorType(err)).Msg("create outbox publisher")
+	}
+	avatarProcessor, err := app.NewAvatarProcessService(avatarRepo, s3Client, kafkaClient)
+	if err != nil {
+		logger.Fatal().Str("error_type", app.ErrorType(err)).Msg("create avatar processor")
+	}
+	avatarDeleter, err := app.NewAvatarDeleteWorkerService(avatarRepo, s3Client)
+	if err != nil {
+		logger.Fatal().Str("error_type", app.ErrorType(err)).Msg("create avatar deleter")
+	}
 
 	if err := app.RunWorker(ctx, cfg, logger, outboxPublisher, kafkaClient, avatarProcessor, avatarDeleter); err != nil {
 		if !errors.Is(err, context.Canceled) {
-			logger.Fatal().Err(err).Msg("worker stopped with error")
+			logger.Fatal().Str("error_type", app.ErrorType(err)).Msg("worker stopped with error")
 		}
 	}
 }

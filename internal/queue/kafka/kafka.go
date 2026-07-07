@@ -3,33 +3,72 @@ package kafka
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
 	confluent "github.com/confluentinc/confluent-kafka-go/v2/kafka"
+	"go.opentelemetry.io/otel"
+	semconv "go.opentelemetry.io/otel/semconv/v1.40.0"
+	"go.opentelemetry.io/otel/trace"
 )
 
 const (
-	TopicAvatarProcess           = "avatar.process.v1"
-	TopicAvatarProcessRetry1m    = "avatar.process.retry.1m.v1"
-	TopicAvatarProcessRetry5m    = "avatar.process.retry.5m.v1"
-	TopicAvatarProcessRetry30m   = "avatar.process.retry.30m.v1"
+	// TopicAvatarProcess содержит имя основной темы обработки аватаров
+	TopicAvatarProcess = "avatar.process.v1"
+	// TopicAvatarProcessRetry1m содержит имя темы повторной обработки через одну минуту
+	TopicAvatarProcessRetry1m = "avatar.process.retry.1m.v1"
+	// TopicAvatarProcessRetry5m содержит имя темы повторной обработки через пять минут
+	TopicAvatarProcessRetry5m = "avatar.process.retry.5m.v1"
+	// TopicAvatarProcessRetry30m содержит имя темы повторной обработки через тридцать минут
+	TopicAvatarProcessRetry30m = "avatar.process.retry.30m.v1"
+	// TopicAvatarProcessDeadLetter содержит имя темы недоставленных сообщений обработки
 	TopicAvatarProcessDeadLetter = "avatar.process.dead-letter.v1"
-	TopicAvatarDelete            = "avatar.delete.v1"
+	// TopicAvatarDelete содержит имя темы удаления аватаров
+	TopicAvatarDelete = "avatar.delete.v1"
 )
 
+// Client объединяет производителя и потребителя Confluent с телеметрией
 type Client struct {
-	producer *confluent.Producer
-	consumer *confluent.Consumer
+	producer      producerAPI
+	consumer      consumerAPI
+	consumerGroup string
+	telemetry     kafkaTelemetry
 }
 
+// Message содержит тело, заголовки и метаданные сообщения Kafka
 type Message struct {
+	// Topic содержит тему полученного сообщения Kafka
 	Topic string
-	Key   []byte
+	// Key содержит ключ сообщения и не экспортируется в телеметрию
+	Key []byte
+	// Value содержит тело сообщения и не экспортируется в телеметрию
 	Value []byte
+	// Headers содержит заголовки Kafka вместе с контекстом трассировки W3C
+	Headers map[string]string
+	// Partition содержит раздел полученного сообщения
+	Partition int32
+	// Offset содержит смещение полученного сообщения
+	Offset int64
 }
 
-// NewClient создает Kafka client на базе Confluent producer
+// producerAPI описывает используемую часть производителя Confluent
+type producerAPI interface {
+	Produce(message *confluent.Message, deliveryChan chan confluent.Event) error
+	GetMetadata(topic *string, allTopics bool, timeoutMs int) (*confluent.Metadata, error)
+	Flush(timeoutMs int) int
+	Close()
+}
+
+// consumerAPI описывает используемую часть потребителя Confluent
+type consumerAPI interface {
+	SubscribeTopics(topics []string, rebalanceCb confluent.RebalanceCb) error
+	Poll(timeoutMs int) confluent.Event
+	CommitMessage(message *confluent.Message) ([]confluent.TopicPartition, error)
+	Close() error
+}
+
+// NewClient создаёт клиент Kafka на базе производителя и потребителя Confluent
 func NewClient(brokers []string, clientID string, consumerGroup string) (*Client, error) {
 	producer, err := confluent.NewProducer(&confluent.ConfigMap{
 		"bootstrap.servers": strings.Join(brokers, ","),
@@ -51,15 +90,39 @@ func NewClient(brokers []string, clientID string, consumerGroup string) (*Client
 		producer.Close()
 		return nil, fmt.Errorf("create kafka consumer: %w", err)
 	}
+	telemetry, err := newKafkaTelemetry()
+	if err != nil {
+		producer.Close()
+		_ = consumer.Close()
+		return nil, fmt.Errorf("create kafka telemetry: %w", err)
+	}
 
 	return &Client{
-		producer: producer,
-		consumer: consumer,
+		producer:      producer,
+		consumer:      consumer,
+		consumerGroup: consumerGroup,
+		telemetry:     telemetry,
 	}, nil
 }
 
-// Publish публикует сообщение в Kafka topic через Confluent producer
-func (c *Client) Publish(ctx context.Context, topic string, key string, payload []byte) error {
+// Publish публикует сообщение в тему Kafka через производителя Confluent
+func (c *Client) Publish(ctx context.Context, topic string, key string, payload []byte, headers map[string]string) error {
+	messageHeaders := messageHeadersFromContext(ctx)
+	for name, value := range headers {
+		messageHeaders[name] = value
+	}
+	parentCtx := ctx
+	if headers != nil {
+		extractedCtx := ExtractTraceContext(ctx, headers)
+		extractedSpan := trace.SpanContextFromContext(extractedCtx)
+		currentSpan := trace.SpanContextFromContext(ctx)
+		if !currentSpan.IsValid() || currentSpan.TraceID() != extractedSpan.TraceID() {
+			parentCtx = extractedCtx
+		}
+	}
+	spanCtx, operation := c.telemetry.startOperation(parentCtx, topic, "send", "send", trace.SpanKindProducer)
+	carrier := headerCarrierFromMap(messageHeaders)
+	otel.GetTextMapPropagator().Inject(spanCtx, &carrier)
 	delivery := make(chan confluent.Event, 1)
 
 	err := c.producer.Produce(&confluent.Message{
@@ -67,10 +130,12 @@ func (c *Client) Publish(ctx context.Context, topic string, key string, payload 
 			Topic:     &topic,
 			Partition: confluent.PartitionAny,
 		},
-		Key:   []byte(key),
-		Value: payload,
+		Key:     []byte(key),
+		Value:   payload,
+		Headers: carrier,
 	}, delivery)
 	if err != nil {
+		operation.finish(kafkaResultError, err)
 		return fmt.Errorf("produce kafka message: %w", err)
 	}
 
@@ -78,18 +143,25 @@ func (c *Client) Publish(ctx context.Context, topic string, key string, payload 
 	case event := <-delivery:
 		message, ok := event.(*confluent.Message)
 		if !ok {
-			return fmt.Errorf("unexpected kafka delivery event %T", event)
+			err := fmt.Errorf("unexpected kafka delivery event %T", event)
+			operation.finish(kafkaResultError, err)
+			return err
 		}
 		if message.TopicPartition.Error != nil {
+			operation.finish(kafkaResultError, message.TopicPartition.Error)
 			return fmt.Errorf("deliver kafka message: %w", message.TopicPartition.Error)
 		}
+		operation.finish(kafkaResultSuccess, nil,
+			semconv.MessagingDestinationPartitionID(strconv.FormatInt(int64(message.TopicPartition.Partition), 10)),
+		)
 		return nil
 	case <-ctx.Done():
+		operation.finish(kafkaResultError, ctx.Err())
 		return ctx.Err()
 	}
 }
 
-// Consume читает Kafka messages и коммитит offset только после успешного handler
+// Consume читает сообщения Kafka и фиксирует смещение только после успешной обработки
 func (c *Client) Consume(ctx context.Context, topics []string, handler func(context.Context, Message) error) error {
 	if err := c.consumer.SubscribeTopics(topics, nil); err != nil {
 		return fmt.Errorf("subscribe kafka topics: %w", err)
@@ -114,16 +186,47 @@ func (c *Client) Consume(ctx context.Context, topics []string, handler func(cont
 				topic = *item.TopicPartition.Topic
 			}
 			message := Message{
-				Topic: topic,
-				Key:   item.Key,
-				Value: item.Value,
+				Topic:     topic,
+				Key:       item.Key,
+				Value:     item.Value,
+				Headers:   HeaderCarrier(item.Headers).Map(),
+				Partition: item.TopicPartition.Partition,
+				Offset:    int64(item.TopicPartition.Offset),
 			}
-			if err := handler(ctx, message); err != nil {
+			parentCtx := ExtractTraceContext(ctx, message.Headers)
+			parentCtx = contextWithMessageHeaders(parentCtx, message.Headers)
+			processCtx, processOperation := c.telemetry.startOperation(
+				parentCtx,
+				topic,
+				"process",
+				"process",
+				trace.SpanKindConsumer,
+				kafkaMessageAttributes(c.consumerGroup, message.Partition, message.Offset)...,
+			)
+			if err := handler(processCtx, message); err != nil {
+				processOperation.finish(kafkaResultError, err)
 				continue
 			}
-			if _, err := c.consumer.CommitMessage(item); err != nil {
+			_, commitOperation := c.telemetry.startOperation(
+				processCtx,
+				topic,
+				"commit",
+				"settle",
+				trace.SpanKindClient,
+				kafkaMessageAttributes(c.consumerGroup, message.Partition, message.Offset)...,
+			)
+			_, err := c.consumer.CommitMessage(item)
+			if err != nil {
+				commitOperation.finish(kafkaResultError, err)
+				processOperation.finish(kafkaResultError, err)
 				return fmt.Errorf("commit kafka message: %w", err)
 			}
+			commitOperation.finish(kafkaResultSuccess, nil)
+			processOperation.span.AddEvent(
+				"messaging.kafka.offset.commit",
+				trace.WithAttributes(kafkaMessageAttributes(c.consumerGroup, message.Partition, message.Offset)...),
+			)
+			processOperation.finish(kafkaResultSuccess, nil)
 		case confluent.Error:
 			if item.IsFatal() {
 				return fmt.Errorf("fatal kafka consumer error: %w", item)
@@ -132,7 +235,7 @@ func (c *Client) Consume(ctx context.Context, topics []string, handler func(cont
 	}
 }
 
-// HealthCheck проверяет доступность Kafka client
+// HealthCheck проверяет доступность клиента Kafka
 func (c *Client) HealthCheck(ctx context.Context) error {
 	errCh := make(chan error, 1)
 	go func() {
@@ -151,7 +254,7 @@ func (c *Client) HealthCheck(ctx context.Context) error {
 	}
 }
 
-// Close закрывает Kafka producer и дожидается отправки буфера
+// Close закрывает клиент Kafka и дожидается отправки буфера производителя
 func (c *Client) Close() {
 	_ = c.consumer.Close()
 	c.producer.Flush(int((5 * time.Second).Milliseconds()))

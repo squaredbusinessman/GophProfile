@@ -15,14 +15,19 @@ const (
 	fallbackDefaultAvatarPNG  = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
 )
 
+// DefaultAvatar содержит тело и HTTP-метаданные изображения-заглушки
 type DefaultAvatar struct {
-	Body         []byte
-	ContentType  string
-	ETag         string
+	// Body содержит изображение в формате PNG
+	Body []byte
+	// ContentType содержит MIME-тип изображения
+	ContentType string
+	// ETag содержит идентификатор версии изображения
+	ETag string
+	// CacheControl содержит политику HTTP-кеширования
 	CacheControl string
 }
 
-// LoadDefaultAvatar читает PNG-заглушку avatar из файла
+// LoadDefaultAvatar читает PNG-заглушку аватара из файла
 func LoadDefaultAvatar(path string) (DefaultAvatar, error) {
 	normalizedPath := strings.TrimSpace(path)
 	if normalizedPath == "" {
@@ -37,7 +42,7 @@ func LoadDefaultAvatar(path string) (DefaultAvatar, error) {
 	return NewDefaultAvatar(body), nil
 }
 
-// NewDefaultAvatar создает описание статической PNG-заглушки avatar
+// NewDefaultAvatar создаёт описание статической PNG-заглушки аватара
 func NewDefaultAvatar(body []byte) DefaultAvatar {
 	copiedBody := append([]byte(nil), body...)
 	hash := sha256.Sum256(copiedBody)

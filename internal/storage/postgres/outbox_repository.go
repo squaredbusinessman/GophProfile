@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -11,23 +12,54 @@ import (
 	"github.com/squaredbusinessman/GophProfile/internal/domain/outbox"
 )
 
+// OutboxRepository сохраняет аватары и события outbox в PostgreSQL
 type OutboxRepository struct {
-	db *sql.DB
+	db        *sql.DB
+	telemetry postgresTelemetry
 }
 
-// NewOutboxRepository создает repository для outbox событий
-func NewOutboxRepository(db *sql.DB) *OutboxRepository {
-	return &OutboxRepository{db: db}
+// ReadOutboxOperationalStats возвращает размер очереди и возраст старейшего события outbox
+func (r *OutboxRepository) ReadOutboxOperationalStats(ctx context.Context) (pendingCount int64, oldestAgeSeconds float64, err error) {
+	ctx, operation := r.telemetry.startRepositoryOperation(ctx, "SELECT", "outbox_events")
+	defer func() { finishRepositoryOperation(operation, err) }()
+	err = r.db.QueryRowContext(ctx, `
+		SELECT
+			COUNT(*),
+			COALESCE(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - MIN(created_at))), 0)
+		FROM outbox_events
+		WHERE status = $1
+	`, string(outbox.StatusPending)).Scan(&pendingCount, &oldestAgeSeconds)
+	if err != nil {
+		return 0, 0, fmt.Errorf("read outbox operational stats: %w", err)
+	}
+	return pendingCount, oldestAgeSeconds, nil
 }
 
-// CreateAvatarWithOutbox атомарно сохраняет avatar и outbox событие
-func (r *OutboxRepository) CreateAvatarWithOutbox(ctx context.Context, item avatar.Avatar, event outbox.Event) error {
+// NewOutboxRepository создаёт репозиторий событий outbox
+func NewOutboxRepository(db *sql.DB) (*OutboxRepository, error) {
+	telemetry, err := newPostgresTelemetry()
+	if err != nil {
+		return nil, fmt.Errorf("create outbox repository telemetry: %w", err)
+	}
+	return &OutboxRepository{db: db, telemetry: telemetry}, nil
+}
+
+// CreateAvatarWithOutbox атомарно сохраняет аватар и событие outbox
+func (r *OutboxRepository) CreateAvatarWithOutbox(ctx context.Context, item avatar.Avatar, event outbox.Event) (err error) {
+	ctx, span := r.telemetry.startRepositoryOperation(ctx, "TRANSACTION", "")
+	defer func() { finishRepositoryOperation(span, err) }()
+
 	tx, err := r.db.BeginTx(ctx, nil)
+	addTransactionEvent(span, "db.transaction.begin", err)
 	if err != nil {
 		return fmt.Errorf("begin avatar outbox transaction: %w", err)
 	}
+	committed := false
 	defer func() {
-		_ = tx.Rollback()
+		rollbackErr := tx.Rollback()
+		if !committed {
+			addTransactionEvent(span, "db.transaction.rollback", rollbackErr)
+		}
 	}()
 
 	if err := insertAvatar(ctx, tx, item); err != nil {
@@ -36,21 +68,32 @@ func (r *OutboxRepository) CreateAvatarWithOutbox(ctx context.Context, item avat
 	if err := insertOutboxEvent(ctx, tx, event); err != nil {
 		return err
 	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit avatar outbox transaction: %w", err)
+	commitErr := tx.Commit()
+	addTransactionEvent(span, "db.transaction.commit", commitErr)
+	if commitErr != nil {
+		return fmt.Errorf("commit avatar outbox transaction: %w", commitErr)
 	}
+	committed = true
 
 	return nil
 }
 
-// SoftDeleteAvatarWithOutbox атомарно помечает avatar удаляемой и сохраняет outbox событие
-func (r *OutboxRepository) SoftDeleteAvatarWithOutbox(ctx context.Context, id string, userID string, deletedAt time.Time, event outbox.Event) error {
+// SoftDeleteAvatarWithOutbox атомарно помечает аватар удаляемым и сохраняет событие outbox
+func (r *OutboxRepository) SoftDeleteAvatarWithOutbox(ctx context.Context, id string, userID string, deletedAt time.Time, event outbox.Event) (err error) {
+	ctx, span := r.telemetry.startRepositoryOperation(ctx, "TRANSACTION", "")
+	defer func() { finishRepositoryOperation(span, err) }()
+
 	tx, err := r.db.BeginTx(ctx, nil)
+	addTransactionEvent(span, "db.transaction.begin", err)
 	if err != nil {
 		return fmt.Errorf("begin avatar delete outbox transaction: %w", err)
 	}
+	committed := false
 	defer func() {
-		_ = tx.Rollback()
+		rollbackErr := tx.Rollback()
+		if !committed {
+			addTransactionEvent(span, "db.transaction.rollback", rollbackErr)
+		}
 	}()
 
 	result, err := tx.ExecContext(ctx, `
@@ -71,15 +114,21 @@ func (r *OutboxRepository) SoftDeleteAvatarWithOutbox(ctx context.Context, id st
 	if err := insertOutboxEvent(ctx, tx, event); err != nil {
 		return err
 	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit avatar delete outbox transaction: %w", err)
+	commitErr := tx.Commit()
+	addTransactionEvent(span, "db.transaction.commit", commitErr)
+	if commitErr != nil {
+		return fmt.Errorf("commit avatar delete outbox transaction: %w", commitErr)
 	}
+	committed = true
 
 	return nil
 }
 
-// MarkOutboxPublished отмечает outbox событие опубликованным
-func (r *OutboxRepository) MarkOutboxPublished(ctx context.Context, id string, publishedAt time.Time) error {
+// MarkOutboxPublished отмечает событие outbox опубликованным
+func (r *OutboxRepository) MarkOutboxPublished(ctx context.Context, id string, publishedAt time.Time) (err error) {
+	ctx, span := r.telemetry.startRepositoryOperation(ctx, "UPDATE", "outbox_events")
+	defer func() { finishRepositoryOperation(span, err) }()
+
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE outbox_events
 		SET status = $2,
@@ -95,8 +144,11 @@ func (r *OutboxRepository) MarkOutboxPublished(ctx context.Context, id string, p
 	return expectOutboxAffected(result)
 }
 
-// MarkOutboxPublishAttemptFailed сохраняет ошибку публикации и оставляет событие pending
-func (r *OutboxRepository) MarkOutboxPublishAttemptFailed(ctx context.Context, id string, publishErr error, updatedAt time.Time) error {
+// MarkOutboxPublishAttemptFailed сохраняет ошибку публикации и оставляет событие ожидающим
+func (r *OutboxRepository) MarkOutboxPublishAttemptFailed(ctx context.Context, id string, publishErr error, updatedAt time.Time) (err error) {
+	ctx, span := r.telemetry.startRepositoryOperation(ctx, "UPDATE", "outbox_events")
+	defer func() { finishRepositoryOperation(span, err) }()
+
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE outbox_events
 		SET attempts = attempts + 1,
@@ -112,8 +164,11 @@ func (r *OutboxRepository) MarkOutboxPublishAttemptFailed(ctx context.Context, i
 	return expectOutboxAffected(result)
 }
 
-// ListPendingOutboxEvents возвращает pending outbox события для retry publisher
-func (r *OutboxRepository) ListPendingOutboxEvents(ctx context.Context, limit int) ([]outbox.Event, error) {
+// ListPendingOutboxEvents возвращает ожидающие события outbox для повторной публикации
+func (r *OutboxRepository) ListPendingOutboxEvents(ctx context.Context, limit int) (events []outbox.Event, err error) {
+	ctx, span := r.telemetry.startRepositoryOperation(ctx, "SELECT", "outbox_events")
+	defer func() { finishRepositoryOperation(span, err) }()
+
 	if limit <= 0 {
 		limit = 100
 	}
@@ -124,6 +179,7 @@ func (r *OutboxRepository) ListPendingOutboxEvents(ctx context.Context, limit in
 			topic,
 			event_key,
 			payload,
+			headers,
 			status,
 			attempts,
 			last_error,
@@ -142,7 +198,7 @@ func (r *OutboxRepository) ListPendingOutboxEvents(ctx context.Context, limit in
 		_ = rows.Close()
 	}()
 
-	events := make([]outbox.Event, 0)
+	events = make([]outbox.Event, 0)
 	for rows.Next() {
 		event, err := scanOutboxEvent(rows)
 		if err != nil {
@@ -157,7 +213,7 @@ func (r *OutboxRepository) ListPendingOutboxEvents(ctx context.Context, limit in
 	return events, nil
 }
 
-// insertOutboxEvent сохраняет outbox событие через указанный SQL executor
+// insertOutboxEvent сохраняет событие outbox через указанный исполнитель SQL
 func insertOutboxEvent(ctx context.Context, executor sqlExecutor, event outbox.Event) error {
 	_, err := executor.ExecContext(ctx, `
 		INSERT INTO outbox_events (
@@ -165,6 +221,7 @@ func insertOutboxEvent(ctx context.Context, executor sqlExecutor, event outbox.E
 			topic,
 			event_key,
 			payload,
+			headers,
 			status,
 			attempts,
 			last_error,
@@ -172,12 +229,13 @@ func insertOutboxEvent(ctx context.Context, executor sqlExecutor, event outbox.E
 			updated_at,
 			published_at
 		)
-		VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10)
+		VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7, $8, $9, $10, $11)
 	`,
 		event.ID,
 		event.Topic,
 		event.Key,
 		event.Payload,
+		headersJSON(event.Headers),
 		string(event.Status),
 		event.Attempts,
 		stringPtrToNullString(event.LastError),
@@ -192,10 +250,11 @@ func insertOutboxEvent(ctx context.Context, executor sqlExecutor, event outbox.E
 	return nil
 }
 
-// scanOutboxEvent читает outbox событие из результата SQL-запроса
+// scanOutboxEvent читает событие outbox из результата SQL-запроса
 func scanOutboxEvent(scanner rowScanner) (outbox.Event, error) {
 	var event outbox.Event
 	var status string
+	var headersJSON []byte
 	var lastError sql.NullString
 	var publishedAt sql.NullTime
 
@@ -204,6 +263,7 @@ func scanOutboxEvent(scanner rowScanner) (outbox.Event, error) {
 		&event.Topic,
 		&event.Key,
 		&event.Payload,
+		&headersJSON,
 		&status,
 		&event.Attempts,
 		&lastError,
@@ -219,12 +279,27 @@ func scanOutboxEvent(scanner rowScanner) (outbox.Event, error) {
 	}
 
 	event.Status = outbox.Status(status)
+	if err := json.Unmarshal(headersJSON, &event.Headers); err != nil {
+		return outbox.Event{}, fmt.Errorf("decode outbox headers: %w", err)
+	}
 	event.LastError = nullStringToStringPtr(lastError)
 	event.PublishedAt = nullTimeToTimePtr(publishedAt)
 	return event, nil
 }
 
-// expectOutboxAffected проверяет что SQL-команда изменила outbox строку
+// headersJSON сериализует заголовки Kafka в объект JSON и заменяет nil пустым объектом
+func headersJSON(headers map[string]string) []byte {
+	if headers == nil {
+		headers = map[string]string{}
+	}
+	data, err := json.Marshal(headers)
+	if err != nil {
+		return []byte(`{}`)
+	}
+	return data
+}
+
+// expectOutboxAffected проверяет, что SQL-команда изменила строку outbox
 func expectOutboxAffected(result sql.Result) error {
 	affected, err := result.RowsAffected()
 	if err != nil {

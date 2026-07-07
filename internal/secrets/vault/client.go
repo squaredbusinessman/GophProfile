@@ -1,3 +1,4 @@
+// Package vault предоставляет клиент HashiCorp Vault для чтения секретов
 package vault
 
 import (
@@ -12,8 +13,10 @@ import (
 	"github.com/squaredbusinessman/GophProfile/internal/config"
 )
 
+// ErrSecretNotFound сообщает об отсутствии секрета Vault
 var ErrSecretNotFound = errors.New("vault secret not found")
 
+// Client читает секреты KV v2 и проверяет доступность Vault
 type Client struct {
 	addr       string
 	token      string
@@ -21,7 +24,7 @@ type Client struct {
 	httpClient *http.Client
 }
 
-// NewClient создает Vault client для чтения секретов
+// NewClient создаёт клиент Vault для чтения секретов
 func NewClient(cfg config.VaultConfig) *Client {
 	return &Client{
 		addr:  strings.TrimRight(cfg.Addr, "/"),
@@ -33,7 +36,7 @@ func NewClient(cfg config.VaultConfig) *Client {
 	}
 }
 
-// ReadKV2 читает secret из Vault KV v2 engine
+// ReadKV2 читает секрет из хранилища Vault KV v2
 func (c *Client) ReadKV2(ctx context.Context, path string) (map[string]string, error) {
 	secretURL, err := c.secretURL(path)
 	if err != nil {

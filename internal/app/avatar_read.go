@@ -13,49 +13,68 @@ import (
 )
 
 var (
-	ErrAvatarNotFound          = errors.New("avatar not found")
-	ErrAvatarProcessing        = errors.New("avatar is still processing")
-	ErrUnsupportedAvatarSize   = errors.New("unsupported avatar size")
+	// ErrAvatarNotFound сообщает об отсутствии доступного аватара
+	ErrAvatarNotFound = errors.New("avatar not found")
+	// ErrAvatarProcessing сообщает, что обработка аватара ещё не завершена
+	ErrAvatarProcessing = errors.New("avatar is still processing")
+	// ErrUnsupportedAvatarSize сообщает о неподдерживаемом размере изображения
+	ErrUnsupportedAvatarSize = errors.New("unsupported avatar size")
+	// ErrUnsupportedAvatarFormat сообщает о неподдерживаемом формате изображения
 	ErrUnsupportedAvatarFormat = errors.New("unsupported avatar format")
 )
 
+// AvatarReadRepository описывает чтение метаданных аватаров
 type AvatarReadRepository interface {
 	GetAvatar(ctx context.Context, id string) (avatar.Avatar, error)
 	ListAvatarsByUser(ctx context.Context, userID string, limit int, offset int) ([]avatar.Avatar, error)
 }
 
+// UserEmailLookup описывает поиск пользователя по адресу электронной почты
 type UserEmailLookup interface {
 	GetUserByEmail(ctx context.Context, email string) (user.User, error)
 }
 
+// AvatarObjectReader описывает чтение объекта аватара
 type AvatarObjectReader interface {
 	Get(ctx context.Context, key string) (io.ReadCloser, storages3.ObjectMetadata, error)
 }
 
+// AvatarReadService предоставляет чтение объектов и метаданных аватаров
 type AvatarReadService struct {
 	users   UserEmailLookup
 	avatars AvatarReadRepository
 	objects AvatarObjectReader
 }
 
+// AvatarReadResult содержит поток объекта и его HTTP-метаданные
 type AvatarReadResult struct {
-	Body        io.ReadCloser
+	// Body предоставляет содержимое объекта
+	Body io.ReadCloser
+	// ContentType содержит MIME-тип объекта
 	ContentType string
-	ETag        string
-	Size        int64
+	// ETag содержит идентификатор версии объекта
+	ETag string
+	// Size содержит размер объекта в байтах
+	Size int64
 }
 
+// AvatarMetadataResult содержит метаданные аватара
 type AvatarMetadataResult struct {
+	// Avatar содержит доменную модель аватара
 	Avatar avatar.Avatar
 }
 
+// AvatarListResult содержит страницу аватаров пользователя
 type AvatarListResult struct {
-	Items  []avatar.Avatar
-	Limit  int
+	// Items содержит аватары текущей страницы
+	Items []avatar.Avatar
+	// Limit содержит максимальное число элементов страницы
+	Limit int
+	// Offset содержит смещение страницы
 	Offset int
 }
 
-// NewAvatarReadService создает service чтения avatar
+// NewAvatarReadService создаёт сервис чтения аватаров
 func NewAvatarReadService(avatars AvatarReadRepository, objects AvatarObjectReader) *AvatarReadService {
 	return &AvatarReadService{
 		avatars: avatars,
@@ -63,7 +82,7 @@ func NewAvatarReadService(avatars AvatarReadRepository, objects AvatarObjectRead
 	}
 }
 
-// NewAvatarReadServiceWithUsers создает service чтения avatar с поиском пользователя по email
+// NewAvatarReadServiceWithUsers создаёт сервис чтения аватаров с поиском пользователя по электронной почте
 func NewAvatarReadServiceWithUsers(users UserEmailLookup, avatars AvatarReadRepository, objects AvatarObjectReader) *AvatarReadService {
 	return &AvatarReadService{
 		users:   users,
@@ -72,7 +91,7 @@ func NewAvatarReadServiceWithUsers(users UserEmailLookup, avatars AvatarReadRepo
 	}
 }
 
-// GetAvatarByID возвращает stream avatar object по avatar id
+// GetAvatarByID возвращает поток объекта аватара по его идентификатору
 func (s *AvatarReadService) GetAvatarByID(ctx context.Context, avatarID string, size string, format string) (AvatarReadResult, error) {
 	item, err := s.avatars.GetAvatar(ctx, avatarID)
 	if err != nil {
@@ -85,7 +104,7 @@ func (s *AvatarReadService) GetAvatarByID(ctx context.Context, avatarID string, 
 	return s.getAvatarObject(ctx, item, size, format)
 }
 
-// GetLatestAvatarByUserID возвращает stream последней активной avatar пользователя
+// GetLatestAvatarByUserID возвращает поток последнего активного аватара пользователя
 func (s *AvatarReadService) GetLatestAvatarByUserID(ctx context.Context, userID string, size string, format string) (AvatarReadResult, error) {
 	items, err := s.avatars.ListAvatarsByUser(ctx, userID, 1, 0)
 	if err != nil {
@@ -98,7 +117,7 @@ func (s *AvatarReadService) GetLatestAvatarByUserID(ctx context.Context, userID 
 	return s.getAvatarObject(ctx, items[0], size, format)
 }
 
-// GetLatestAvatarByEmail возвращает stream последней активной avatar через сопоставление email с user_id
+// GetLatestAvatarByEmail возвращает поток последнего активного аватара по электронной почте пользователя
 func (s *AvatarReadService) GetLatestAvatarByEmail(ctx context.Context, email string, size string, format string) (AvatarReadResult, error) {
 	if s.users == nil {
 		return AvatarReadResult{}, fmt.Errorf("user email lookup is not configured")
@@ -115,7 +134,7 @@ func (s *AvatarReadService) GetLatestAvatarByEmail(ctx context.Context, email st
 	return s.GetLatestAvatarByUserID(ctx, owner.ID, size, format)
 }
 
-// GetAvatarMetadata возвращает metadata активной avatar по id
+// GetAvatarMetadata возвращает метаданные активного аватара по идентификатору
 func (s *AvatarReadService) GetAvatarMetadata(ctx context.Context, avatarID string) (AvatarMetadataResult, error) {
 	item, err := s.avatars.GetAvatar(ctx, avatarID)
 	if err != nil {
@@ -128,7 +147,7 @@ func (s *AvatarReadService) GetAvatarMetadata(ctx context.Context, avatarID stri
 	return AvatarMetadataResult{Avatar: item}, nil
 }
 
-// ListAvatarsByUserID возвращает активные avatar пользователя
+// ListAvatarsByUserID возвращает активные аватары пользователя
 func (s *AvatarReadService) ListAvatarsByUserID(ctx context.Context, userID string, limit int, offset int) (AvatarListResult, error) {
 	items, err := s.avatars.ListAvatarsByUser(ctx, userID, limit, offset)
 	if err != nil {
@@ -142,7 +161,7 @@ func (s *AvatarReadService) ListAvatarsByUserID(ctx context.Context, userID stri
 	}, nil
 }
 
-// getAvatarObject выбирает object key по size и возвращает stream из S3
+// getAvatarObject выбирает ключ объекта по размеру и возвращает поток из S3
 func (s *AvatarReadService) getAvatarObject(ctx context.Context, item avatar.Avatar, size string, format string) (AvatarReadResult, error) {
 	key, contentType, err := avatarObjectSelection(item, size)
 	if err != nil {
@@ -172,7 +191,7 @@ func (s *AvatarReadService) getAvatarObject(ctx context.Context, item avatar.Ava
 	}, nil
 }
 
-// avatarObjectSelection выбирает S3 object key и ожидаемый MIME по size
+// avatarObjectSelection выбирает ключ объекта S3 и ожидаемый MIME-тип по размеру
 func avatarObjectSelection(item avatar.Avatar, size string) (string, string, error) {
 	normalizedSize := strings.TrimSpace(strings.ToLower(size))
 	if normalizedSize == "" {
@@ -197,7 +216,7 @@ func avatarObjectSelection(item avatar.Avatar, size string) (string, string, err
 	}
 }
 
-// ensureFormatSupported проверяет что запрошенный format совпадает с сохраненным MIME
+// ensureFormatSupported проверяет, что запрошенный формат совпадает с сохранённым MIME-типом
 func ensureFormatSupported(contentType string, format string) error {
 	normalized := strings.TrimSpace(strings.ToLower(format))
 	if normalized == "" {

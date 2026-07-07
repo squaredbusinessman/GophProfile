@@ -11,11 +11,12 @@ import (
 	"testing"
 
 	"github.com/rs/zerolog"
+	"github.com/squaredbusinessman/GophProfile/internal/app"
 )
 
 // TestHealthReturnsOK проверяет успешный ответ healthcheck
 func TestHealthReturnsOK(t *testing.T) {
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		ServiceName: "gophprofile",
 		Version:     "test",
 		Logger:      zerolog.Nop(),
@@ -47,7 +48,7 @@ func TestHealthReturnsOK(t *testing.T) {
 
 // TestHealthReturnsDependencyChecks проверяет успешные статусы внешних зависимостей
 func TestHealthReturnsDependencyChecks(t *testing.T) {
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		ServiceName: "gophprofile",
 		Version:     "test",
 		Logger:      zerolog.Nop(),
@@ -89,7 +90,7 @@ func TestHealthReturnsDependencyChecks(t *testing.T) {
 
 // TestHealthReturnsServiceUnavailableForFailedCheck проверяет degraded статус при ошибке зависимости
 func TestHealthReturnsServiceUnavailableForFailedCheck(t *testing.T) {
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		ServiceName: "gophprofile",
 		Version:     "test",
 		Logger:      zerolog.Nop(),
@@ -129,7 +130,7 @@ func TestHealthReturnsServiceUnavailableForFailedCheck(t *testing.T) {
 
 // TestHealthRejectsUnsupportedMethod проверяет отказ для неподдержанного метода
 func TestHealthRejectsUnsupportedMethod(t *testing.T) {
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		ServiceName: "gophprofile",
 		Version:     "test",
 		Logger:      zerolog.Nop(),
@@ -151,7 +152,7 @@ func TestHealthRejectsUnsupportedMethod(t *testing.T) {
 // TestHTTPAccessLogUsesInfoForSuccess проверяет info-уровень для успешного запроса
 func TestHTTPAccessLogUsesInfoForSuccess(t *testing.T) {
 	var logs bytes.Buffer
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		ServiceName: "gophprofile",
 		Version:     "test",
 		Logger:      zerolog.New(&logs),
@@ -173,7 +174,7 @@ func TestHTTPAccessLogUsesInfoForSuccess(t *testing.T) {
 // TestHTTPAccessLogUsesWarnForClientError проверяет warn-уровень для клиентской ошибки
 func TestHTTPAccessLogUsesWarnForClientError(t *testing.T) {
 	var logs bytes.Buffer
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		ServiceName: "gophprofile",
 		Version:     "test",
 		Logger:      zerolog.New(&logs),
@@ -187,4 +188,81 @@ func TestHTTPAccessLogUsesWarnForClientError(t *testing.T) {
 	if !strings.Contains(logs.String(), `"level":"warn"`) {
 		t.Fatalf("access log = %s, want warn level", logs.String())
 	}
+}
+
+// TestRequestIDIsStoredInHandlerContext проверяет передачу request_id в context обработчика
+func TestRequestIDIsStoredInHandlerContext(t *testing.T) {
+	var requestID string
+	handler := newRouterForTest(t, RouterConfig{
+		Logger: zerolog.Nop(),
+		HealthChecks: map[string]HealthCheck{
+			"context": func(ctx context.Context) error {
+				requestID = app.RequestIDFromContext(ctx)
+				return nil
+			},
+		},
+	})
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	req.Header.Set("X-Request-ID", "request-test-123")
+
+	handler.ServeHTTP(httptest.NewRecorder(), req)
+
+	if requestID != "request-test-123" {
+		t.Fatalf("request_id = %q, ожидался request-test-123", requestID)
+	}
+}
+
+// TestValidationErrorDoesNotProduceInternalErrorLog проверяет уровень validation ошибки
+func TestValidationErrorDoesNotProduceInternalErrorLog(t *testing.T) {
+	var logs bytes.Buffer
+	handler := newRouterForTest(t, RouterConfig{
+		Logger:       zerolog.New(&logs),
+		UserResolver: failingUserResolver{},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/users/resolve", strings.NewReader(`{"unknown":true}`))
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, ожидался 400", rec.Code)
+	}
+	if strings.Contains(logs.String(), `"level":"error"`) || !strings.Contains(logs.String(), `"level":"warn"`) {
+		t.Fatalf("validation log имеет неверный уровень: %s", logs.String())
+	}
+}
+
+// TestInternalErrorLogDoesNotExposeDSN проверяет защиту секретов во внутренней ошибке
+func TestInternalErrorLogDoesNotExposeDSN(t *testing.T) {
+	const secretDSN = "postgres://secret:password@db:5432/gophprofile"
+	var logs bytes.Buffer
+	handler := newRouterForTest(t, RouterConfig{
+		Logger:       zerolog.New(&logs),
+		UserResolver: failingUserResolver{err: errors.New(secretDSN)},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/users/resolve", strings.NewReader(`{"email":"user@example.com"}`))
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, ожидался 500", rec.Code)
+	}
+	if strings.Contains(logs.String(), secretDSN) || strings.Contains(logs.String(), "password") {
+		t.Fatalf("error log содержит DSN или секрет: %s", logs.String())
+	}
+	if !strings.Contains(logs.String(), `"level":"error"`) || !strings.Contains(logs.String(), `"error_type":"*errors.errorString"`) {
+		t.Fatalf("внутренняя ошибка не классифицирована: %s", logs.String())
+	}
+}
+
+// failingUserResolver возвращает настроенную ошибку разрешения пользователя
+type failingUserResolver struct {
+	// err содержит возвращаемую тестовую ошибку
+	err error
+}
+
+// ResolveUserByEmail возвращает ошибку тестового разрешения пользователя
+func (r failingUserResolver) ResolveUserByEmail(context.Context, string) (app.UserResolveResult, error) {
+	return app.UserResolveResult{}, r.err
 }

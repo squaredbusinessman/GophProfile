@@ -12,7 +12,9 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/squaredbusinessman/GophProfile/internal/domain/avatar"
+	"github.com/squaredbusinessman/GophProfile/internal/domain/outbox"
 	"github.com/squaredbusinessman/GophProfile/internal/domain/user"
+	"go.opentelemetry.io/otel"
 )
 
 // TestIntegrationAvatarRepositorySoftDeleteFiltersActiveReads проверяет repository на реальном PostgreSQL
@@ -28,7 +30,7 @@ func TestIntegrationAvatarRepositorySoftDeleteFiltersActiveReads(t *testing.T) {
 	userID := "6f3f3c2d-df58-4e64-91ea-cdf90f4c9c1e"
 	avatarID := "b3d3a31b-8333-49d7-b921-eccbfdfb5074"
 
-	userRepo := NewUserRepository(db)
+	userRepo := newUserRepositoryForTest(t, db)
 	if err := userRepo.CreateUser(ctx, user.User{
 		ID:        userID,
 		Email:     "user@example.com",
@@ -38,7 +40,7 @@ func TestIntegrationAvatarRepositorySoftDeleteFiltersActiveReads(t *testing.T) {
 		t.Fatalf("CreateUser returned error: %v", err)
 	}
 
-	repo := NewAvatarRepository(db)
+	repo := newAvatarRepositoryForTest(t, db)
 	item := avatar.Avatar{
 		ID:                avatarID,
 		UserID:            userID,
@@ -107,7 +109,7 @@ func TestIntegrationUserRepositoryFindOrCreateKeepsStableID(t *testing.T) {
 
 	ctx := context.Background()
 	now := time.Date(2026, 6, 10, 10, 0, 0, 0, time.UTC)
-	repo := NewUserRepository(db)
+	repo := newUserRepositoryForTest(t, db)
 
 	first, err := repo.FindOrCreateUserByEmail(ctx, "User@Example.COM", now)
 	if err != nil {
@@ -127,6 +129,75 @@ func TestIntegrationUserRepositoryFindOrCreateKeepsStableID(t *testing.T) {
 	}
 	if found.ID != first.ID {
 		t.Fatalf("found user id = %q, want %q", found.ID, first.ID)
+	}
+}
+
+// TestIntegrationPostgresQueryCreatesChildSpan проверяет trace настоящего PostgreSQL query
+func TestIntegrationPostgresQueryCreatesChildSpan(t *testing.T) {
+	recorder := installPostgresSpanRecorder(t)
+	db := openIntegrationDB(t)
+	cleanupIntegrationTables(t, db)
+	t.Cleanup(func() {
+		cleanupIntegrationTables(t, db)
+	})
+
+	ctx, parent := otel.Tracer("integration-test").Start(context.Background(), "upload")
+	parentSpanID := parent.SpanContext().SpanID()
+	repo := newUserRepositoryForTest(t, db)
+	err := repo.CreateUser(ctx, user.User{
+		ID:        "0c543858-df6a-4596-a3c5-0c8f2d74f153",
+		Email:     "trace@example.com",
+		CreatedAt: time.Date(2026, 6, 20, 10, 0, 0, 0, time.UTC),
+		UpdatedAt: time.Date(2026, 6, 20, 10, 0, 0, 0, time.UTC),
+	})
+	parent.End()
+	if err != nil {
+		t.Fatalf("CreateUser returned error: %v", err)
+	}
+
+	for _, span := range recorder.Ended() {
+		if span.Name() == "INSERT users" {
+			if span.Parent().SpanID() != parentSpanID {
+				t.Fatalf("database parent span = %s, want %s", span.Parent().SpanID(), parentSpanID)
+			}
+			return
+		}
+	}
+	t.Fatal("INSERT users span was not recorded")
+}
+
+// TestIntegrationOutboxHeadersRoundTrip проверяет JSONB carrier на реальном PostgreSQL
+func TestIntegrationOutboxHeadersRoundTrip(t *testing.T) {
+	db := openIntegrationDB(t)
+	cleanupIntegrationTables(t, db)
+	t.Cleanup(func() {
+		cleanupIntegrationTables(t, db)
+	})
+
+	now := time.Date(2026, 6, 20, 11, 0, 0, 0, time.UTC)
+	event := outbox.Event{
+		ID:      "de1c2054-ed30-4967-867c-e7d0260fdf79",
+		Topic:   "avatar.process.v1",
+		Key:     "avatar-id",
+		Payload: []byte(`{"avatar_id":"avatar-id"}`),
+		Headers: map[string]string{
+			"traceparent": "00-11111111111111111111111111111111-2222222222222222-01",
+			"x-custom":    "preserved",
+		},
+		Status:    outbox.StatusPending,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := insertOutboxEvent(context.Background(), db, event); err != nil {
+		t.Fatalf("insertOutboxEvent returned error: %v", err)
+	}
+
+	events, err := newOutboxRepositoryForTest(t, db).ListPendingOutboxEvents(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("ListPendingOutboxEvents returned error: %v", err)
+	}
+	if len(events) != 1 || events[0].Headers["traceparent"] != event.Headers["traceparent"] || events[0].Headers["x-custom"] != "preserved" {
+		t.Fatalf("outbox headers = %#v", events)
 	}
 }
 

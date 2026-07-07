@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// TestLoadUsesLocalDefaults проверяет локальные дефолты конфигурации
+// TestLoadUsesLocalDefaults проверяет локальные значения конфигурации по умолчанию
 func TestLoadUsesLocalDefaults(t *testing.T) {
 	t.Setenv("SERVICE_NAME", "")
 	t.Setenv("APP_VERSION", "")
@@ -18,6 +18,10 @@ func TestLoadUsesLocalDefaults(t *testing.T) {
 	t.Setenv("DEFAULT_AVATAR_PATH", "")
 	t.Setenv("DATABASE_URL", "")
 	t.Setenv("KAFKA_BROKERS", "")
+	t.Setenv("OTEL_ENABLED", "")
+	t.Setenv("OTEL_SERVICE_NAME", "")
+	t.Setenv("METRICS_ADDR", "")
+	t.Setenv("LOG_FORMAT", "")
 
 	cfg := Load()
 
@@ -51,9 +55,18 @@ func TestLoadUsesLocalDefaults(t *testing.T) {
 	if cfg.Worker.OutboxBatchSize != 100 {
 		t.Fatalf("Worker.OutboxBatchSize = %d, want 100", cfg.Worker.OutboxBatchSize)
 	}
+	if cfg.Observability.Enabled {
+		t.Fatal("Observability.Enabled = true, want false")
+	}
+	if cfg.Observability.ServiceName != "gophprofile" || cfg.Observability.MetricsAddr != ":9090" {
+		t.Fatalf("Observability defaults = %q/%q, want gophprofile/:9090", cfg.Observability.ServiceName, cfg.Observability.MetricsAddr)
+	}
+	if cfg.Observability.LogLevel != "info" || cfg.Observability.LogFormat != "json" {
+		t.Fatalf("logging defaults = %q/%q, want info/json", cfg.Observability.LogLevel, cfg.Observability.LogFormat)
+	}
 }
 
-// TestLoadReadsEnvironment проверяет чтение конфигурации из env
+// TestLoadReadsEnvironment проверяет чтение конфигурации из переменных окружения
 func TestLoadReadsEnvironment(t *testing.T) {
 	t.Setenv("SERVICE_NAME", "custom-profile")
 	t.Setenv("APP_VERSION", "test-version")
@@ -67,6 +80,15 @@ func TestLoadReadsEnvironment(t *testing.T) {
 	t.Setenv("KAFKA_BROKERS", "localhost:19092, localhost:29092")
 	t.Setenv("OUTBOX_POLL_INTERVAL", "2s")
 	t.Setenv("OUTBOX_BATCH_SIZE", "25")
+	t.Setenv("OTEL_ENABLED", "true")
+	t.Setenv("OTEL_SERVICE_NAME", "profile-api")
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "collector:4317")
+	t.Setenv("OTEL_EXPORTER_OTLP_INSECURE", "false")
+	t.Setenv("OTEL_TRACES_SAMPLER", "traceidratio")
+	t.Setenv("OTEL_TRACES_SAMPLER_ARG", "0.25")
+	t.Setenv("METRICS_ADDR", "127.0.0.1:19090")
+	t.Setenv("LOG_LEVEL", "warn")
+	t.Setenv("LOG_FORMAT", "json")
 
 	cfg := Load()
 
@@ -105,6 +127,34 @@ func TestLoadReadsEnvironment(t *testing.T) {
 	}
 	if cfg.Worker.OutboxBatchSize != 25 {
 		t.Fatalf("Worker.OutboxBatchSize = %d, want 25", cfg.Worker.OutboxBatchSize)
+	}
+	if !cfg.Observability.Enabled || cfg.Observability.ServiceName != "profile-api" {
+		t.Fatalf("Observability enabled/name = %t/%q", cfg.Observability.Enabled, cfg.Observability.ServiceName)
+	}
+	if cfg.Observability.OTLPEndpoint != "collector:4317" || cfg.Observability.OTLPInsecure {
+		t.Fatalf("OTLP endpoint/insecure = %q/%t", cfg.Observability.OTLPEndpoint, cfg.Observability.OTLPInsecure)
+	}
+	if cfg.Observability.TracesSampler != "traceidratio" || cfg.Observability.TracesSamplerArg != 0.25 {
+		t.Fatalf("sampler = %q/%f", cfg.Observability.TracesSampler, cfg.Observability.TracesSamplerArg)
+	}
+	if cfg.Observability.MetricsAddr != "127.0.0.1:19090" || cfg.Observability.LogLevel != "warn" || cfg.Observability.LogFormat != "json" {
+		t.Fatalf("metrics/logging overrides were not loaded: %#v", cfg.Observability)
+	}
+}
+
+// TestLoadForProcessUsesDistinctObservabilityDefaults проверяет разные настройки серверного и фонового процессов
+func TestLoadForProcessUsesDistinctObservabilityDefaults(t *testing.T) {
+	t.Setenv("OTEL_SERVICE_NAME", "")
+	t.Setenv("METRICS_ADDR", "")
+
+	server := LoadForProcess("server")
+	worker := LoadForProcess("worker")
+
+	if server.Observability.ServiceName != "gophprofile-server" || server.Observability.MetricsAddr != ":9090" {
+		t.Fatalf("server defaults = %q/%q", server.Observability.ServiceName, server.Observability.MetricsAddr)
+	}
+	if worker.Observability.ServiceName != "gophprofile-worker" || worker.Observability.MetricsAddr != ":9091" {
+		t.Fatalf("worker defaults = %q/%q", worker.Observability.ServiceName, worker.Observability.MetricsAddr)
 	}
 }
 

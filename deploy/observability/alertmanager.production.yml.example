@@ -1,0 +1,26 @@
+# Для production запускайте Alertmanager с --config.expand-env
+route:
+  receiver: production
+  group_by:
+    - alertname
+    - service
+    - severity
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+receivers:
+  - name: production
+    slack_configs:
+      - api_url: ${ALERTMANAGER_SLACK_API_URL}
+        channel: ${ALERTMANAGER_SLACK_CHANNEL}
+        send_resolved: true
+        title: '{{ .CommonLabels.alertname }} {{ .CommonLabels.severity }}'
+        text: '{{ range .Alerts }}{{ .Annotations.summary }} runbook={{ .Labels.runbook }}{{ "\n" }}{{ end }}'
+    email_configs:
+      - smarthost: ${ALERTMANAGER_SMTP_SMARTHOST}
+        from: ${ALERTMANAGER_SMTP_FROM}
+        to: ${ALERTMANAGER_EMAIL_TO}
+        auth_username: ${ALERTMANAGER_SMTP_USERNAME}
+        auth_password: ${ALERTMANAGER_SMTP_PASSWORD}
+        send_resolved: true

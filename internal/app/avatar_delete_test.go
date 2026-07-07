@@ -24,7 +24,7 @@ func TestDeleteAvatarByIDSoftDeletesAndPublishes(t *testing.T) {
 	}
 	events := &fakeAvatarDeleteOutboxStore{}
 	publisher := &fakeEventPublisher{}
-	service := NewAvatarDeleteService(avatars, events, publisher)
+	service := newAvatarDeleteServiceForTest(t, avatars, events, publisher)
 
 	err := service.DeleteAvatarByID(context.Background(), "avatar-1", "user-1")
 	if err != nil {
@@ -68,7 +68,7 @@ func TestDeleteAvatarByIDRejectsForeignOwner(t *testing.T) {
 	}
 	events := &fakeAvatarDeleteOutboxStore{}
 	publisher := &fakeEventPublisher{}
-	service := NewAvatarDeleteService(avatars, events, publisher)
+	service := newAvatarDeleteServiceForTest(t, avatars, events, publisher)
 
 	err := service.DeleteAvatarByID(context.Background(), "avatar-1", "user-2")
 	if !errors.Is(err, ErrAvatarForbidden) {
@@ -93,7 +93,7 @@ func TestDeleteAvatarByIDIsNoopForAlreadyDeletedAvatar(t *testing.T) {
 	}
 	events := &fakeAvatarDeleteOutboxStore{}
 	publisher := &fakeEventPublisher{}
-	service := NewAvatarDeleteService(avatars, events, publisher)
+	service := newAvatarDeleteServiceForTest(t, avatars, events, publisher)
 
 	err := service.DeleteAvatarByID(context.Background(), "avatar-1", "user-1")
 	if err != nil {
@@ -106,7 +106,7 @@ func TestDeleteAvatarByIDIsNoopForAlreadyDeletedAvatar(t *testing.T) {
 
 // TestDeleteLatestAvatarByUserIDIsNoopWithoutActiveAvatar проверяет повторный DELETE по пользователю
 func TestDeleteLatestAvatarByUserIDIsNoopWithoutActiveAvatar(t *testing.T) {
-	service := NewAvatarDeleteService(
+	service := newAvatarDeleteServiceForTest(t,
 		&fakeAvatarDeleteRepository{},
 		&fakeAvatarDeleteOutboxStore{},
 		&fakeEventPublisher{},
@@ -133,7 +133,7 @@ func TestHandleDeleteMessageDeletesObjectsAndMarksDeleted(t *testing.T) {
 		},
 	}
 	objects := &fakeAvatarDeleteObjectStore{}
-	service := NewAvatarDeleteWorkerService(avatars, objects)
+	service := newAvatarDeleteWorkerServiceForTest(t, avatars, objects)
 
 	err := service.HandleDeleteMessage(context.Background(), []byte(`{"avatar_id":"avatar-1","user_id":"user-1"}`))
 	if err != nil {
@@ -169,7 +169,7 @@ func TestHandleDeleteMessageSkipsDeletedAvatar(t *testing.T) {
 		},
 	}
 	objects := &fakeAvatarDeleteObjectStore{}
-	service := NewAvatarDeleteWorkerService(avatars, objects)
+	service := newAvatarDeleteWorkerServiceForTest(t, avatars, objects)
 
 	err := service.HandleDeleteMessage(context.Background(), []byte(`{"avatar_id":"avatar-1","user_id":"user-1"}`))
 	if err != nil {
@@ -224,6 +224,8 @@ type fakeAvatarDeleteOutboxStore struct {
 	err                     error
 	markPublishedCalled     bool
 	markFailedAttemptCalled bool
+	markPublishedErr        error
+	markFailedAttemptErr    error
 }
 
 // SoftDeleteAvatarWithOutbox запоминает fake soft delete и outbox событие
@@ -238,13 +240,13 @@ func (f *fakeAvatarDeleteOutboxStore) SoftDeleteAvatarWithOutbox(ctx context.Con
 // MarkOutboxPublished запоминает fake успешную публикацию outbox
 func (f *fakeAvatarDeleteOutboxStore) MarkOutboxPublished(ctx context.Context, id string, publishedAt time.Time) error {
 	f.markPublishedCalled = true
-	return nil
+	return f.markPublishedErr
 }
 
 // MarkOutboxPublishAttemptFailed запоминает fake ошибку публикации outbox
 func (f *fakeAvatarDeleteOutboxStore) MarkOutboxPublishAttemptFailed(ctx context.Context, id string, publishErr error, updatedAt time.Time) error {
 	f.markFailedAttemptCalled = true
-	return nil
+	return f.markFailedAttemptErr
 }
 
 type fakeAvatarDeleteObjectStore struct {

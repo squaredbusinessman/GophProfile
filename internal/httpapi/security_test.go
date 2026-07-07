@@ -13,7 +13,7 @@ import (
 
 // TestCORSPreflightAllowsConfiguredOrigin проверяет preflight для разрешенного origin
 func TestCORSPreflightAllowsConfiguredOrigin(t *testing.T) {
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		ServiceName:    "gophprofile",
 		Version:        "test",
 		Logger:         zerolog.Nop(),
@@ -43,7 +43,7 @@ func TestCORSPreflightAllowsConfiguredOrigin(t *testing.T) {
 
 // TestCORSRejectsUnconfiguredOrigin проверяет отказ для origin вне allowlist
 func TestCORSRejectsUnconfiguredOrigin(t *testing.T) {
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		ServiceName:    "gophprofile",
 		Version:        "test",
 		Logger:         zerolog.Nop(),
@@ -67,7 +67,7 @@ func TestCORSRejectsUnconfiguredOrigin(t *testing.T) {
 // TestRateLimitRejectsAPIBurst проверяет лимит запросов на API routes
 func TestRateLimitRejectsAPIBurst(t *testing.T) {
 	reader := &fakeAvatarReader{err: app.ErrAvatarNotFound}
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		ServiceName:    "gophprofile",
 		Version:        "test",
 		Logger:         zerolog.Nop(),
@@ -98,7 +98,7 @@ func TestRateLimitRejectsAPIBurst(t *testing.T) {
 
 // TestRateLimitSkipsHealth проверяет что healthcheck не зависит от API limiter
 func TestRateLimitSkipsHealth(t *testing.T) {
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		ServiceName:    "gophprofile",
 		Version:        "test",
 		Logger:         zerolog.Nop(),
@@ -120,7 +120,7 @@ func TestRateLimitSkipsHealth(t *testing.T) {
 // TestAvatarReadErrorDoesNotLeakInternalDetails проверяет что read error не раскрывает секреты
 func TestAvatarReadErrorDoesNotLeakInternalDetails(t *testing.T) {
 	reader := &fakeAvatarReader{err: sensitiveInternalError()}
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		ServiceName:  "gophprofile",
 		Version:      "test",
 		Logger:       zerolog.Nop(),
@@ -140,7 +140,7 @@ func TestAvatarReadErrorDoesNotLeakInternalDetails(t *testing.T) {
 
 // TestAvatarUploadErrorDoesNotLeakInternalDetails проверяет что upload error не раскрывает секреты
 func TestAvatarUploadErrorDoesNotLeakInternalDetails(t *testing.T) {
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		ServiceName:    "gophprofile",
 		Version:        "test",
 		Logger:         zerolog.Nop(),
@@ -160,7 +160,7 @@ func TestAvatarUploadErrorDoesNotLeakInternalDetails(t *testing.T) {
 
 // TestAvatarDeleteErrorDoesNotLeakInternalDetails проверяет что delete error не раскрывает секреты
 func TestAvatarDeleteErrorDoesNotLeakInternalDetails(t *testing.T) {
-	handler := NewRouter(RouterConfig{
+	handler := newRouterForTest(t, RouterConfig{
 		ServiceName:   "gophprofile",
 		Version:       "test",
 		Logger:        zerolog.Nop(),

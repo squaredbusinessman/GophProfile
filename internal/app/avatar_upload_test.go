@@ -5,9 +5,11 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/squaredbusinessman/GophProfile/internal/domain/avatar"
 	"github.com/squaredbusinessman/GophProfile/internal/domain/outbox"
 	"github.com/squaredbusinessman/GophProfile/internal/domain/user"
@@ -22,7 +24,7 @@ func TestUploadAvatarStoresOriginalCreatesAvatarAndPublishesEvent(t *testing.T) 
 	avatarOutbox := &fakeAvatarOutboxStore{}
 	objects := &fakeObjectStore{}
 	publisher := &fakeEventPublisher{}
-	service := NewAvatarUploadService(&fakeUserLookup{item: user.User{ID: uploadTestUserID}}, avatarOutbox, objects, publisher)
+	service := newAvatarUploadServiceForTest(t, &fakeUserLookup{item: user.User{ID: uploadTestUserID}}, avatarOutbox, objects, publisher)
 	service.now = func() time.Time { return now }
 
 	result, err := service.UploadAvatar(context.Background(), AvatarUploadRequest{
@@ -70,7 +72,7 @@ func TestUploadAvatarStoresOriginalCreatesAvatarAndPublishesEvent(t *testing.T) 
 // TestUploadAvatarDoesNotCreateDBRecordWhenS3Fails проверяет порядок S3 до БД
 func TestUploadAvatarDoesNotCreateDBRecordWhenS3Fails(t *testing.T) {
 	avatarOutbox := &fakeAvatarOutboxStore{}
-	service := NewAvatarUploadService(
+	service := newAvatarUploadServiceForTest(t,
 		&fakeUserLookup{item: user.User{ID: uploadTestUserID}},
 		avatarOutbox,
 		&fakeObjectStore{putErr: errors.New("s3 down")},
@@ -95,7 +97,7 @@ func TestUploadAvatarDoesNotCreateDBRecordWhenS3Fails(t *testing.T) {
 func TestUploadAvatarKeepsOutboxPendingWhenPublishFails(t *testing.T) {
 	avatarOutbox := &fakeAvatarOutboxStore{}
 	publisher := &fakeEventPublisher{publishErr: errors.New("kafka down")}
-	service := NewAvatarUploadService(
+	service := newAvatarUploadServiceForTest(t,
 		&fakeUserLookup{item: user.User{ID: uploadTestUserID}},
 		avatarOutbox,
 		&fakeObjectStore{},
@@ -118,11 +120,63 @@ func TestUploadAvatarKeepsOutboxPendingWhenPublishFails(t *testing.T) {
 	}
 }
 
+// TestUploadAvatarLogsOutboxStateUpdateErrors проверяет журналирование ошибок отметки outbox
+func TestUploadAvatarLogsOutboxStateUpdateErrors(t *testing.T) {
+	const secret = "postgres://secret:password@db:5432/gophprofile"
+	tests := []struct {
+		name      string
+		outbox    *fakeAvatarOutboxStore
+		publisher *fakeEventPublisher
+		operation string
+	}{
+		{
+			name:      "mark published",
+			outbox:    &fakeAvatarOutboxStore{markPublishedErr: errors.New(secret)},
+			publisher: &fakeEventPublisher{},
+			operation: "mark_published",
+		},
+		{
+			name:      "mark failed attempt",
+			outbox:    &fakeAvatarOutboxStore{markFailedAttemptErr: errors.New(secret)},
+			publisher: &fakeEventPublisher{publishErr: errors.New("kafka down")},
+			operation: "mark_publish_attempt_failed",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			ctx := ContextWithLogger(context.Background(), zerolog.New(&logs))
+			service := newAvatarUploadServiceForTest(t,
+				&fakeUserLookup{item: user.User{ID: uploadTestUserID}},
+				tt.outbox,
+				&fakeObjectStore{},
+				tt.publisher,
+			)
+
+			_, err := service.UploadAvatar(ctx, AvatarUploadRequest{
+				UserID:      uploadTestUserID,
+				ContentType: "image/png",
+				Reader:      bytes.NewReader([]byte("payload")),
+			})
+			if err != nil {
+				t.Fatalf("UploadAvatar returned error: %v", err)
+			}
+			logText := logs.String()
+			if !strings.Contains(logText, `"level":"error"`) || !strings.Contains(logText, `"operation":"`+tt.operation+`"`) {
+				t.Fatalf("log does not contain expected outbox state error: %s", logText)
+			}
+			if strings.Contains(logText, secret) || strings.Contains(logText, "payload") {
+				t.Fatalf("log contains sensitive data: %s", logText)
+			}
+		})
+	}
+}
+
 // TestUploadAvatarReturnsUserNotFound проверяет отсутствие пользователя по UUID
 func TestUploadAvatarReturnsUserNotFound(t *testing.T) {
 	avatarOutbox := &fakeAvatarOutboxStore{}
 	objects := &fakeObjectStore{}
-	service := NewAvatarUploadService(
+	service := newAvatarUploadServiceForTest(t,
 		&fakeUserLookup{err: user.ErrNotFound},
 		avatarOutbox,
 		objects,
@@ -147,7 +201,7 @@ type fakeUserLookup struct {
 	err  error
 }
 
-// GetUser возвращает fake пользователя по UUID
+// GetUser возвращает тестового пользователя по UUID
 func (f *fakeUserLookup) GetUser(ctx context.Context, id string) (user.User, error) {
 	if f.err != nil {
 		return user.User{}, f.err
@@ -162,9 +216,11 @@ type fakeAvatarOutboxStore struct {
 	createErr               error
 	markPublishedCalled     bool
 	markFailedAttemptCalled bool
+	markPublishedErr        error
+	markFailedAttemptErr    error
 }
 
-// CreateAvatarWithOutbox запоминает fake-запись avatar и outbox событие
+// CreateAvatarWithOutbox запоминает тестовые записи аватара и события outbox
 func (f *fakeAvatarOutboxStore) CreateAvatarWithOutbox(ctx context.Context, item avatar.Avatar, event outbox.Event) error {
 	f.createCalled = true
 	f.created = item
@@ -172,16 +228,16 @@ func (f *fakeAvatarOutboxStore) CreateAvatarWithOutbox(ctx context.Context, item
 	return f.createErr
 }
 
-// MarkOutboxPublished запоминает fake-успешную публикацию outbox
+// MarkOutboxPublished запоминает успешную публикацию тестового события outbox
 func (f *fakeAvatarOutboxStore) MarkOutboxPublished(ctx context.Context, id string, publishedAt time.Time) error {
 	f.markPublishedCalled = true
-	return nil
+	return f.markPublishedErr
 }
 
-// MarkOutboxPublishAttemptFailed запоминает fake-ошибку публикации outbox
+// MarkOutboxPublishAttemptFailed запоминает ошибку публикации тестового события outbox
 func (f *fakeAvatarOutboxStore) MarkOutboxPublishAttemptFailed(ctx context.Context, id string, publishErr error, updatedAt time.Time) error {
 	f.markFailedAttemptCalled = true
-	return nil
+	return f.markFailedAttemptErr
 }
 
 type fakeObjectStore struct {
@@ -189,7 +245,7 @@ type fakeObjectStore struct {
 	putErr    error
 }
 
-// Put запоминает fake-загрузку object storage
+// Put запоминает тестовую загрузку в объектное хранилище
 func (f *fakeObjectStore) Put(ctx context.Context, key string, reader io.Reader, size int64, contentType string) error {
 	f.putCalled = true
 	return f.putErr
@@ -202,14 +258,19 @@ type fakeEventPublisher struct {
 	topic         string
 	key           string
 	payload       []byte
+	headers       map[string]string
 }
 
-// Publish запоминает fake-публикацию события
-func (f *fakeEventPublisher) Publish(ctx context.Context, topic string, key string, payload []byte) error {
+// Publish запоминает тестовую публикацию события
+func (f *fakeEventPublisher) Publish(ctx context.Context, topic string, key string, payload []byte, headers map[string]string) error {
 	f.publishCalled = true
 	f.publishCalls++
 	f.topic = topic
 	f.key = key
 	f.payload = append([]byte(nil), payload...)
+	f.headers = make(map[string]string, len(headers))
+	for name, value := range headers {
+		f.headers[name] = value
+	}
 	return f.publishErr
 }

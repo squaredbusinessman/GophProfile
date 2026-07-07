@@ -11,24 +11,35 @@ import (
 )
 
 const (
+	// MaxAvatarFileSize задаёт максимальный размер загружаемого аватара в байтах
 	MaxAvatarFileSize       int64 = 10 * 1024 * 1024
 	avatarUploadMemoryLimit int64 = 1 * 1024 * 1024
 	avatarUploadBodyLimit   int64 = MaxAvatarFileSize + avatarUploadMemoryLimit
 )
 
+// ValidatedAvatarUpload содержит проверенные данные загружаемого файла
 type ValidatedAvatarUpload struct {
-	UserID      string
-	FileName    string
+	// UserID содержит идентификатор владельца
+	UserID string
+	// FileName содержит исходное имя файла
+	FileName string
+	// ContentType содержит проверенный MIME-тип
 	ContentType string
-	Size        int64
-	FileHeader  *multipart.FileHeader
-	form        *multipart.Form
+	// Size содержит размер файла в байтах
+	Size int64
+	// FileHeader содержит заголовок файла multipart
+	FileHeader *multipart.FileHeader
+	form       *multipart.Form
 }
 
+// ValidationError описывает безопасную ошибку клиентского запроса
 type ValidationError struct {
-	StatusCode int    `json:"-"`
-	Message    string `json:"error"`
-	Details    string `json:"details,omitempty"`
+	// StatusCode содержит HTTP-код ответа
+	StatusCode int `json:"-"`
+	// Message содержит краткое описание ошибки
+	Message string `json:"error"`
+	// Details содержит безопасные дополнительные сведения
+	Details string `json:"details,omitempty"`
 }
 
 // Error возвращает человекочитаемое описание ошибки валидации
@@ -39,12 +50,12 @@ func (e *ValidationError) Error() string {
 	return e.Message + ": " + e.Details
 }
 
-// Open открывает валидированный multipart file для дальнейшего чтения
+// Open открывает проверенный файл multipart для дальнейшего чтения
 func (u *ValidatedAvatarUpload) Open() (multipart.File, error) {
 	return u.FileHeader.Open()
 }
 
-// Close удаляет временные файлы multipart form
+// Close удаляет временные файлы формы multipart
 func (u *ValidatedAvatarUpload) Close() error {
 	if u.form == nil {
 		return nil
@@ -52,7 +63,7 @@ func (u *ValidatedAvatarUpload) Close() error {
 	return u.form.RemoveAll()
 }
 
-// ValidateAvatarUploadRequest проверяет запрос загрузки avatar до обращения к S3
+// ValidateAvatarUploadRequest проверяет запрос загрузки аватара до обращения к S3
 func ValidateAvatarUploadRequest(w http.ResponseWriter, req *http.Request) (*ValidatedAvatarUpload, error) {
 	userID, err := validateRequesterUserID(req.Header.Get("X-User-ID"))
 	if err != nil {
@@ -103,7 +114,7 @@ func ValidateAvatarUploadRequest(w http.ResponseWriter, req *http.Request) (*Val
 	}, nil
 }
 
-// parseMultipartError мапит ошибку multipart parsing в ошибку API
+// parseMultipartError преобразует ошибку разбора multipart в ошибку API
 func parseMultipartError(err error) error {
 	var maxBytesError *http.MaxBytesError
 	if errors.As(err, &maxBytesError) {
@@ -112,7 +123,7 @@ func parseMultipartError(err error) error {
 	return validationError("Invalid multipart form", "Request must include multipart field file")
 }
 
-// requiredFileHeader возвращает обязательный multipart file header
+// requiredFileHeader возвращает обязательный заголовок файла multipart
 func requiredFileHeader(form *multipart.Form) (*multipart.FileHeader, error) {
 	if form == nil || form.File == nil {
 		return nil, validationError("Missing file", "Multipart field file is required")

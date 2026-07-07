@@ -1,3 +1,4 @@
+// Package postgres предоставляет репозитории приложения для PostgreSQL
 package postgres
 
 import (
@@ -10,25 +11,74 @@ import (
 	"github.com/squaredbusinessman/GophProfile/internal/domain/avatar"
 )
 
+// AvatarRepository сохраняет и читает аватары в PostgreSQL
 type AvatarRepository struct {
-	db *sql.DB
+	db        *sql.DB
+	telemetry postgresTelemetry
+}
+
+// ReadAvatarOperationalStats возвращает количество аватаров по состояниям и размер оригиналов
+func (r *AvatarRepository) ReadAvatarOperationalStats(ctx context.Context) (countByStatus map[avatar.Status]int64, originalStorageBytes int64, err error) {
+	ctx, operation := r.telemetry.startRepositoryOperation(ctx, "SELECT", "avatars")
+	defer func() { finishRepositoryOperation(operation, err) }()
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT status, COUNT(*)
+		FROM avatars
+		GROUP BY status
+	`)
+	if err != nil {
+		return nil, 0, fmt.Errorf("read avatar count by status: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	countByStatus = make(map[avatar.Status]int64)
+	for rows.Next() {
+		var status avatar.Status
+		var count int64
+		if err := rows.Scan(&status, &count); err != nil {
+			return nil, 0, fmt.Errorf("scan avatar count by status: %w", err)
+		}
+		if err := avatar.ValidateStatus(status); err != nil {
+			return nil, 0, err
+		}
+		countByStatus[status] = count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("iterate avatar count by status: %w", err)
+	}
+
+	err = r.db.QueryRowContext(ctx, `
+		SELECT COALESCE(SUM(size_bytes), 0)
+		FROM avatars
+		WHERE status <> $1
+	`, string(avatar.StatusDeleted)).Scan(&originalStorageBytes)
+	if err != nil {
+		return nil, 0, fmt.Errorf("read original storage bytes: %w", err)
+	}
+	return countByStatus, originalStorageBytes, nil
 }
 
 type sqlExecutor interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }
 
-// NewAvatarRepository создает repository для работы с avatar в PostgreSQL
-func NewAvatarRepository(db *sql.DB) *AvatarRepository {
-	return &AvatarRepository{db: db}
+// NewAvatarRepository создаёт репозиторий аватаров в PostgreSQL
+func NewAvatarRepository(db *sql.DB) (*AvatarRepository, error) {
+	telemetry, err := newPostgresTelemetry()
+	if err != nil {
+		return nil, fmt.Errorf("create avatar repository telemetry: %w", err)
+	}
+	return &AvatarRepository{db: db, telemetry: telemetry}, nil
 }
 
-// CreateAvatar сохраняет новую avatar со статусом processing
-func (r *AvatarRepository) CreateAvatar(ctx context.Context, item avatar.Avatar) error {
+// CreateAvatar сохраняет новый аватар в состоянии обработки
+func (r *AvatarRepository) CreateAvatar(ctx context.Context, item avatar.Avatar) (err error) {
+	ctx, operation := r.telemetry.startRepositoryOperation(ctx, "INSERT", "avatars")
+	defer func() { finishRepositoryOperation(operation, err) }()
 	return insertAvatar(ctx, r.db, item)
 }
 
-// insertAvatar сохраняет avatar через указанный SQL executor
+// insertAvatar сохраняет аватар через указанный исполнитель SQL
 func insertAvatar(ctx context.Context, executor sqlExecutor, item avatar.Avatar) error {
 	if err := avatar.ValidateStatus(item.Status); err != nil {
 		return err
@@ -75,8 +125,11 @@ func insertAvatar(ctx context.Context, executor sqlExecutor, item avatar.Avatar)
 	return nil
 }
 
-// GetAvatar возвращает активную avatar по id
-func (r *AvatarRepository) GetAvatar(ctx context.Context, id string) (avatar.Avatar, error) {
+// GetAvatar возвращает активный аватар по идентификатору
+func (r *AvatarRepository) GetAvatar(ctx context.Context, id string) (item avatar.Avatar, err error) {
+	ctx, operation := r.telemetry.startRepositoryOperation(ctx, "SELECT", "avatars")
+	defer func() { finishRepositoryOperation(operation, err) }()
+
 	row := r.db.QueryRowContext(ctx, `
 		SELECT
 			id,
@@ -98,7 +151,7 @@ func (r *AvatarRepository) GetAvatar(ctx context.Context, id string) (avatar.Ava
 			AND deleted_at IS NULL
 	`, id)
 
-	item, err := scanAvatar(row)
+	item, err = scanAvatar(row)
 	if err != nil {
 		return avatar.Avatar{}, err
 	}
@@ -107,7 +160,10 @@ func (r *AvatarRepository) GetAvatar(ctx context.Context, id string) (avatar.Ava
 }
 
 // GetAvatarIncludingDeleted возвращает avatar по id включая мягко удаленные записи
-func (r *AvatarRepository) GetAvatarIncludingDeleted(ctx context.Context, id string) (avatar.Avatar, error) {
+func (r *AvatarRepository) GetAvatarIncludingDeleted(ctx context.Context, id string) (item avatar.Avatar, err error) {
+	ctx, operation := r.telemetry.startRepositoryOperation(ctx, "SELECT", "avatars")
+	defer func() { finishRepositoryOperation(operation, err) }()
+
 	row := r.db.QueryRowContext(ctx, `
 		SELECT
 			id,
@@ -128,7 +184,7 @@ func (r *AvatarRepository) GetAvatarIncludingDeleted(ctx context.Context, id str
 		WHERE id = $1
 	`, id)
 
-	item, err := scanAvatar(row)
+	item, err = scanAvatar(row)
 	if err != nil {
 		return avatar.Avatar{}, err
 	}
@@ -137,7 +193,10 @@ func (r *AvatarRepository) GetAvatarIncludingDeleted(ctx context.Context, id str
 }
 
 // ListAvatarsByUser возвращает активные avatar пользователя по внутреннему UUID
-func (r *AvatarRepository) ListAvatarsByUser(ctx context.Context, userID string, limit int, offset int) ([]avatar.Avatar, error) {
+func (r *AvatarRepository) ListAvatarsByUser(ctx context.Context, userID string, limit int, offset int) (items []avatar.Avatar, err error) {
+	ctx, operation := r.telemetry.startRepositoryOperation(ctx, "SELECT", "avatars")
+	defer func() { finishRepositoryOperation(operation, err) }()
+
 	if limit <= 0 {
 		limit = 50
 	}
@@ -174,7 +233,7 @@ func (r *AvatarRepository) ListAvatarsByUser(ctx context.Context, userID string,
 		_ = rows.Close()
 	}()
 
-	items := make([]avatar.Avatar, 0)
+	items = make([]avatar.Avatar, 0)
 	for rows.Next() {
 		item, err := scanAvatar(rows)
 		if err != nil {
@@ -190,10 +249,12 @@ func (r *AvatarRepository) ListAvatarsByUser(ctx context.Context, userID string,
 }
 
 // UpdateAvatarStatus обновляет статус активной avatar
-func (r *AvatarRepository) UpdateAvatarStatus(ctx context.Context, id string, status avatar.Status, updatedAt time.Time) error {
+func (r *AvatarRepository) UpdateAvatarStatus(ctx context.Context, id string, status avatar.Status, updatedAt time.Time) (err error) {
 	if err := avatar.ValidateStatus(status); err != nil {
 		return err
 	}
+	ctx, operation := r.telemetry.startRepositoryOperation(ctx, "UPDATE", "avatars")
+	defer func() { finishRepositoryOperation(operation, err) }()
 
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE avatars
@@ -210,7 +271,10 @@ func (r *AvatarRepository) UpdateAvatarStatus(ctx context.Context, id string, st
 }
 
 // MarkAvatarReady сохраняет размеры и ключи миниатюр после обработки
-func (r *AvatarRepository) MarkAvatarReady(ctx context.Context, id string, width int, height int, thumb100Key string, thumb300Key string, updatedAt time.Time) error {
+func (r *AvatarRepository) MarkAvatarReady(ctx context.Context, id string, width int, height int, thumb100Key string, thumb300Key string, updatedAt time.Time) (err error) {
+	ctx, operation := r.telemetry.startRepositoryOperation(ctx, "UPDATE", "avatars")
+	defer func() { finishRepositoryOperation(operation, err) }()
+
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE avatars
 		SET status = $2,
@@ -230,7 +294,10 @@ func (r *AvatarRepository) MarkAvatarReady(ctx context.Context, id string, width
 }
 
 // SoftDeleteAvatar выполняет мягкое удаление avatar пользователя по внутреннему UUID
-func (r *AvatarRepository) SoftDeleteAvatar(ctx context.Context, id string, userID string, deletedAt time.Time) error {
+func (r *AvatarRepository) SoftDeleteAvatar(ctx context.Context, id string, userID string, deletedAt time.Time) (err error) {
+	ctx, operation := r.telemetry.startRepositoryOperation(ctx, "UPDATE", "avatars")
+	defer func() { finishRepositoryOperation(operation, err) }()
+
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE avatars
 		SET status = $3,
@@ -248,7 +315,10 @@ func (r *AvatarRepository) SoftDeleteAvatar(ctx context.Context, id string, user
 }
 
 // MarkAvatarDeleted переводит avatar в состояние удаленных S3 objects
-func (r *AvatarRepository) MarkAvatarDeleted(ctx context.Context, id string, updatedAt time.Time) error {
+func (r *AvatarRepository) MarkAvatarDeleted(ctx context.Context, id string, updatedAt time.Time) (err error) {
+	ctx, operation := r.telemetry.startRepositoryOperation(ctx, "UPDATE", "avatars")
+	defer func() { finishRepositoryOperation(operation, err) }()
+
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE avatars
 		SET status = $2,

@@ -1,3 +1,4 @@
+// Package httpapi предоставляет HTTP API приложения
 package httpapi
 
 import (
@@ -7,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	// Регистрируем декодер JPEG для проверки загружаемых изображений
 	_ "image/jpeg"
 	_ "image/png"
 	"io"
@@ -20,25 +22,43 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/squaredbusinessman/GophProfile/internal/app"
 	"github.com/squaredbusinessman/GophProfile/internal/domain/avatar"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	semconv "go.opentelemetry.io/otel/semconv/v1.40.0"
 )
 
 var requestCounter uint64
 
+// RouterConfig содержит зависимости и параметры HTTP-маршрутизатора
 type RouterConfig struct {
-	ServiceName    string
-	Version        string
-	Logger         zerolog.Logger
+	// ServiceName содержит имя сервиса для служебных ответов
+	ServiceName string
+	// Version содержит версию сервиса
+	Version string
+	// Logger задаёт базовый журнал приложения
+	Logger zerolog.Logger
+	// AllowedOrigins содержит разрешённые источники CORS
 	AllowedOrigins []string
-	RateLimitRPS   int
+	// RateLimitRPS задаёт среднее число запросов в секунду на клиента
+	RateLimitRPS int
+	// RateLimitBurst задаёт допустимый всплеск запросов на клиента
 	RateLimitBurst int
-	HealthChecks   map[string]HealthCheck
-	DefaultAvatar  DefaultAvatar
-	UserResolver   UserResolver
+	// HealthChecks содержит проверки внешних зависимостей
+	HealthChecks map[string]HealthCheck
+	// DefaultAvatar содержит изображение-заглушку
+	DefaultAvatar DefaultAvatar
+	// UserResolver сопоставляет электронную почту с пользователем
+	UserResolver UserResolver
+	// AvatarUploader загружает новые аватары
 	AvatarUploader AvatarUploader
-	AvatarReader   AvatarReader
-	AvatarDeleter  AvatarDeleter
+	// AvatarReader читает аватары и их метаданные
+	AvatarReader AvatarReader
+	// AvatarDeleter удаляет аватары
+	AvatarDeleter AvatarDeleter
 }
 
+// Router обрабатывает HTTP-запросы приложения
 type Router struct {
 	serviceName    string
 	version        string
@@ -52,18 +72,24 @@ type Router struct {
 	avatarReader   AvatarReader
 	avatarDeleter  AvatarDeleter
 	mux            *http.ServeMux
+	// telemetry содержит счётчик HTTP-запросов и число выполняемых запросов
+	telemetry httpServerTelemetry
 }
 
+// HealthCheck описывает проверку доступности внешней зависимости
 type HealthCheck func(ctx context.Context) error
 
+// UserResolver описывает сопоставление электронной почты с пользователем
 type UserResolver interface {
 	ResolveUserByEmail(ctx context.Context, email string) (app.UserResolveResult, error)
 }
 
+// AvatarUploader описывает загрузку нового аватара
 type AvatarUploader interface {
 	UploadAvatar(ctx context.Context, req app.AvatarUploadRequest) (app.AvatarUploadResult, error)
 }
 
+// AvatarReader описывает чтение объектов и метаданных аватаров
 type AvatarReader interface {
 	GetAvatarByID(ctx context.Context, avatarID string, size string, format string) (app.AvatarReadResult, error)
 	GetLatestAvatarByUserID(ctx context.Context, userID string, size string, format string) (app.AvatarReadResult, error)
@@ -72,13 +98,18 @@ type AvatarReader interface {
 	ListAvatarsByUserID(ctx context.Context, userID string, limit int, offset int) (app.AvatarListResult, error)
 }
 
+// AvatarDeleter описывает логическое удаление аватаров
 type AvatarDeleter interface {
 	DeleteAvatarByID(ctx context.Context, avatarID string, requesterUserID string) error
 	DeleteLatestAvatarByUserID(ctx context.Context, targetUserID string, requesterUserID string) error
 }
 
-// NewRouter создает HTTP router приложения
-func NewRouter(cfg RouterConfig) http.Handler {
+// NewRouter создаёт HTTP-маршрутизатор приложения
+func NewRouter(cfg RouterConfig) (http.Handler, error) {
+	telemetry, err := newHTTPServerTelemetry(otel.Meter(instrumentationName))
+	if err != nil {
+		return nil, fmt.Errorf("create HTTP telemetry: %w", err)
+	}
 	router := &Router{
 		serviceName:    cfg.ServiceName,
 		version:        cfg.Version,
@@ -92,6 +123,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 		avatarReader:   cfg.AvatarReader,
 		avatarDeleter:  cfg.AvatarDeleter,
 		mux:            http.NewServeMux(),
+		telemetry:      telemetry,
 	}
 
 	router.mux.HandleFunc("/health", router.handleHealth)
@@ -101,19 +133,38 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	router.mux.HandleFunc("/api/v1/users/resolve", router.handleUserResolve)
 	router.mux.HandleFunc("/api/v1/users/", router.handleUsers)
 
-	return router
+	return otelhttp.NewHandler(
+		router,
+		"http.server",
+		otelhttp.WithFilter(func(req *http.Request) bool {
+			return shouldObserveHTTP(req.URL.Path)
+		}),
+		otelhttp.WithSpanNameFormatter(func(_ string, req *http.Request) string {
+			return req.Method + " " + normalizedHTTPRoute(req.URL.Path)
+		}),
+		otelhttp.WithMetricAttributesFn(func(req *http.Request) []attribute.KeyValue {
+			return []attribute.KeyValue{semconv.HTTPRoute(normalizedHTTPRoute(req.URL.Path))}
+		}),
+	), nil
 }
 
-// ServeHTTP обрабатывает HTTP-запрос и пишет access log с корректным уровнем
+// ServeHTTP обрабатывает HTTP-запрос и записывает журнал доступа с корректным уровнем
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	if shouldObserveHTTP(req.URL.Path) {
+		r.serveObserved(w, req, normalizedHTTPRoute(req.URL.Path))
+		return
+	}
+	r.serveRequest(newStatusRecorder(w), req)
+}
+
+// serveRequest применяет HTTP policy, вызывает handler и пишет access log
+func (r *Router) serveRequest(rec *statusRecorder, req *http.Request) {
 	startedAt := time.Now()
 	requestID := requestID(req)
-	w.Header().Set("X-Request-ID", requestID)
-
-	rec := &statusRecorder{
-		ResponseWriter: w,
-		statusCode:     http.StatusOK,
-	}
+	rec.Header().Set("X-Request-ID", requestID)
+	requestCtx := app.ContextWithLogger(req.Context(), r.logger)
+	requestCtx = app.ContextWithRequestID(requestCtx, requestID)
+	req = req.WithContext(requestCtx)
 
 	if !r.handleCORS(rec, req) {
 		if r.shouldLimit(req) && !r.allowRequest(req) {
@@ -126,15 +177,15 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 
-	event := r.logger.Info()
+	logger := app.LoggerFromContext(req.Context())
+	event := logger.Info()
 	if rec.statusCode >= http.StatusInternalServerError {
-		event = r.logger.Error()
+		event = logger.Error()
 	} else if rec.statusCode >= http.StatusBadRequest {
-		event = r.logger.Warn()
+		event = logger.Warn()
 	}
 
 	event.
-		Str("request_id", requestID).
 		Str("http_method", req.Method).
 		Str("http_path", req.URL.Path).
 		Str("remote_addr", req.RemoteAddr).
@@ -230,6 +281,9 @@ func (r *Router) handlePublicAvatarByEmail(w http.ResponseWriter, req *http.Requ
 			writeDefaultAvatar(w, r.defaultAvatar)
 			return
 		}
+		if isInternalAvatarReadError(err) {
+			r.logInternalError(req.Context(), err, "public avatar read failed")
+		}
 		writeAvatarReadError(w, err)
 		return
 	}
@@ -298,7 +352,9 @@ func (r *Router) handleAvatarUpload(w http.ResponseWriter, req *http.Request) {
 		Reader:      bytes.NewReader(body),
 	})
 	if err != nil {
-		r.logger.Error().Err(err).Msg("avatar upload failed")
+		if !errors.Is(err, app.ErrUserNotFound) {
+			r.logInternalError(req.Context(), err, "avatar upload failed")
+		}
 		writeAvatarUploadError(w, err)
 		return
 	}
@@ -361,6 +417,9 @@ func (r *Router) handleAvatarByID(w http.ResponseWriter, req *http.Request) {
 		return r.avatarReader.GetAvatarByID(ctx, avatarID, size, format)
 	})
 	if err != nil {
+		if isInternalAvatarReadError(err) {
+			r.logInternalError(req.Context(), err, "avatar read failed")
+		}
 		writeAvatarReadError(w, err)
 		return
 	}
@@ -387,6 +446,9 @@ func (r *Router) handleAvatarDeleteByID(w http.ResponseWriter, req *http.Request
 	}
 
 	if err := r.avatarDeleter.DeleteAvatarByID(req.Context(), avatarID, requesterUserID); err != nil {
+		if isInternalAvatarDeleteError(err) {
+			r.logInternalError(req.Context(), err, "avatar delete failed")
+		}
 		writeAvatarDeleteError(w, err)
 		return
 	}
@@ -405,6 +467,9 @@ func (r *Router) handleAvatarMetadata(w http.ResponseWriter, req *http.Request, 
 
 	result, err := r.avatarReader.GetAvatarMetadata(req.Context(), avatarID)
 	if err != nil {
+		if isInternalAvatarReadError(err) {
+			r.logInternalError(req.Context(), err, "avatar metadata read failed")
+		}
 		writeAvatarReadError(w, err)
 		return
 	}
@@ -467,6 +532,9 @@ func (r *Router) handleUsers(w http.ResponseWriter, req *http.Request) {
 			writeDefaultAvatar(w, r.defaultAvatar)
 			return
 		}
+		if isInternalAvatarReadError(err) {
+			r.logInternalError(req.Context(), err, "latest avatar read failed")
+		}
 		writeAvatarReadError(w, err)
 		return
 	}
@@ -493,6 +561,9 @@ func (r *Router) handleLatestAvatarDeleteByUser(w http.ResponseWriter, req *http
 	}
 
 	if err := r.avatarDeleter.DeleteLatestAvatarByUserID(req.Context(), userID, requesterUserID); err != nil {
+		if isInternalAvatarDeleteError(err) {
+			r.logInternalError(req.Context(), err, "latest avatar delete failed")
+		}
 		writeAvatarDeleteError(w, err)
 		return
 	}
@@ -512,6 +583,9 @@ func (r *Router) handleUserAvatarList(w http.ResponseWriter, req *http.Request, 
 	limit, offset := paginationParams(req)
 	result, err := r.avatarReader.ListAvatarsByUserID(req.Context(), userID, limit, offset)
 	if err != nil {
+		if isInternalAvatarReadError(err) {
+			r.logInternalError(req.Context(), err, "avatar list failed")
+		}
 		writeAvatarReadError(w, err)
 		return
 	}
@@ -566,6 +640,7 @@ func (r *Router) handleUserResolve(w http.ResponseWriter, req *http.Request) {
 
 	result, err := r.userResolver.ResolveUserByEmail(req.Context(), email)
 	if err != nil {
+		r.logInternalError(req.Context(), err, "user resolve failed")
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
 			"error": "User resolve failed",
 		})
@@ -581,63 +656,125 @@ func (r *Router) handleUserResolve(w http.ResponseWriter, req *http.Request) {
 	})
 }
 
-type HealthResponse struct {
-	Status    string            `json:"status"`
-	Service   string            `json:"service"`
-	Version   string            `json:"version"`
-	Timestamp time.Time         `json:"timestamp"`
-	Checks    map[string]string `json:"checks"`
+// logInternalError записывает внутреннюю ошибку без потенциально секретного текста
+func (r *Router) logInternalError(ctx context.Context, err error, message string) {
+	app.LoggerFromContext(ctx).Error().
+		Str("error_type", app.ErrorType(err)).
+		Msg(message)
 }
 
+// isInternalAvatarReadError отличает внутреннюю ошибку чтения от ожидаемой клиентской ошибки
+func isInternalAvatarReadError(err error) bool {
+	return !errors.Is(err, app.ErrAvatarNotFound) &&
+		!errors.Is(err, app.ErrAvatarProcessing) &&
+		!errors.Is(err, app.ErrUnsupportedAvatarSize) &&
+		!errors.Is(err, app.ErrUnsupportedAvatarFormat)
+}
+
+// isInternalAvatarDeleteError отличает внутреннюю ошибку удаления от ожидаемой клиентской ошибки
+func isInternalAvatarDeleteError(err error) bool {
+	return !errors.Is(err, app.ErrAvatarNotFound) && !errors.Is(err, app.ErrAvatarForbidden)
+}
+
+// HealthResponse содержит состояние сервиса и его зависимостей
+type HealthResponse struct {
+	// Status содержит общее состояние сервиса
+	Status string `json:"status"`
+	// Service содержит имя сервиса
+	Service string `json:"service"`
+	// Version содержит версию сервиса
+	Version string `json:"version"`
+	// Timestamp содержит время формирования ответа
+	Timestamp time.Time `json:"timestamp"`
+	// Checks содержит состояния внешних зависимостей
+	Checks map[string]string `json:"checks"`
+}
+
+// AvatarUploadResponse содержит результат загрузки аватара
 type AvatarUploadResponse struct {
-	ID        string    `json:"id"`
-	UserID    string    `json:"user_id"`
-	URL       string    `json:"url"`
-	Status    string    `json:"status"`
-	Width     int       `json:"width,omitempty"`
-	Height    int       `json:"height,omitempty"`
+	// ID содержит идентификатор аватара
+	ID string `json:"id"`
+	// UserID содержит идентификатор владельца
+	UserID string `json:"user_id"`
+	// URL содержит относительный адрес аватара
+	URL string `json:"url"`
+	// Status содержит состояние обработки
+	Status string `json:"status"`
+	// Width содержит ширину изображения в пикселях
+	Width int `json:"width,omitempty"`
+	// Height содержит высоту изображения в пикселях
+	Height int `json:"height,omitempty"`
+	// CreatedAt содержит время создания аватара
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// UserResolveRequest содержит запрос сопоставления пользователя
 type UserResolveRequest struct {
+	// Email содержит адрес электронной почты
 	Email string `json:"email"`
 }
 
+// UserResolveResponse содержит сведения о найденном или созданном пользователе
 type UserResolveResponse struct {
-	ID        string    `json:"id"`
-	UserID    string    `json:"user_id"`
-	Email     string    `json:"email"`
+	// ID содержит идентификатор результата
+	ID string `json:"id"`
+	// UserID содержит идентификатор пользователя
+	UserID string `json:"user_id"`
+	// Email содержит нормализованный адрес электронной почты
+	Email string `json:"email"`
+	// CreatedAt содержит время создания пользователя
 	CreatedAt time.Time `json:"created_at"`
+	// UpdatedAt содержит время последнего изменения пользователя
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// AvatarMetadataResponse содержит публичные метаданные аватара
 type AvatarMetadataResponse struct {
-	ID         string            `json:"id"`
-	UserID     string            `json:"user_id"`
-	FileName   string            `json:"file_name"`
-	MimeType   string            `json:"mime_type"`
-	SizeBytes  int64             `json:"size_bytes"`
-	Width      *int              `json:"width"`
-	Height     *int              `json:"height"`
-	Status     string            `json:"status"`
-	URL        string            `json:"url"`
+	// ID содержит идентификатор аватара
+	ID string `json:"id"`
+	// UserID содержит идентификатор владельца
+	UserID string `json:"user_id"`
+	// FileName содержит исходное имя файла
+	FileName string `json:"file_name"`
+	// MimeType содержит MIME-тип оригинала
+	MimeType string `json:"mime_type"`
+	// SizeBytes содержит размер оригинала в байтах
+	SizeBytes int64 `json:"size_bytes"`
+	// Width содержит ширину оригинала в пикселях
+	Width *int `json:"width"`
+	// Height содержит высоту оригинала в пикселях
+	Height *int `json:"height"`
+	// Status содержит состояние обработки
+	Status string `json:"status"`
+	// URL содержит относительный адрес оригинала
+	URL string `json:"url"`
+	// Thumbnails содержит доступные миниатюры
 	Thumbnails []AvatarThumbnail `json:"thumbnails"`
-	CreatedAt  time.Time         `json:"created_at"`
-	UpdatedAt  time.Time         `json:"updated_at"`
+	// CreatedAt содержит время создания аватара
+	CreatedAt time.Time `json:"created_at"`
+	// UpdatedAt содержит время последнего изменения аватара
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// AvatarThumbnail содержит размер и адрес миниатюры
 type AvatarThumbnail struct {
+	// Size содержит размер миниатюры
 	Size string `json:"size"`
-	URL  string `json:"url"`
+	// URL содержит относительный адрес миниатюры
+	URL string `json:"url"`
 }
 
+// AvatarListResponse содержит страницу метаданных аватаров
 type AvatarListResponse struct {
-	Items  []AvatarMetadataResponse `json:"items"`
-	Limit  int                      `json:"limit"`
-	Offset int                      `json:"offset"`
+	// Items содержит элементы текущей страницы
+	Items []AvatarMetadataResponse `json:"items"`
+	// Limit содержит максимальное число элементов страницы
+	Limit int `json:"limit"`
+	// Offset содержит смещение страницы
+	Offset int `json:"offset"`
 }
 
-// avatarMetadataResponse собирает JSON metadata avatar
+// avatarMetadataResponse собирает метаданные аватара для ответа JSON
 func avatarMetadataResponse(item avatar.Avatar) AvatarMetadataResponse {
 	response := AvatarMetadataResponse{
 		ID:         item.ID,
@@ -820,6 +957,11 @@ type statusRecorder struct {
 	http.ResponseWriter
 	statusCode   int
 	bytesWritten int
+}
+
+// newStatusRecorder создаёт recorder со статусом успешного ответа по умолчанию
+func newStatusRecorder(w http.ResponseWriter) *statusRecorder {
+	return &statusRecorder{ResponseWriter: w, statusCode: http.StatusOK}
 }
 
 // WriteHeader сохраняет HTTP-статус перед отправкой ответа клиенту

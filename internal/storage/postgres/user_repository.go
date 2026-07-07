@@ -11,18 +11,27 @@ import (
 	"github.com/squaredbusinessman/GophProfile/internal/domain/user"
 )
 
+// UserRepository сохраняет и читает пользователей в PostgreSQL
 type UserRepository struct {
-	db *sql.DB
+	db        *sql.DB
+	telemetry postgresTelemetry
 }
 
-// NewUserRepository создает repository для работы с пользователями в PostgreSQL
-func NewUserRepository(db *sql.DB) *UserRepository {
-	return &UserRepository{db: db}
+// NewUserRepository создаёт репозиторий пользователей в PostgreSQL
+func NewUserRepository(db *sql.DB) (*UserRepository, error) {
+	telemetry, err := newPostgresTelemetry()
+	if err != nil {
+		return nil, fmt.Errorf("create user repository telemetry: %w", err)
+	}
+	return &UserRepository{db: db, telemetry: telemetry}, nil
 }
 
 // CreateUser сохраняет нового пользователя
-func (r *UserRepository) CreateUser(ctx context.Context, item user.User) error {
-	_, err := r.db.ExecContext(ctx, `
+func (r *UserRepository) CreateUser(ctx context.Context, item user.User) (err error) {
+	ctx, operation := r.telemetry.startRepositoryOperation(ctx, "INSERT", "users")
+	defer func() { finishRepositoryOperation(operation, err) }()
+
+	_, err = r.db.ExecContext(ctx, `
 		INSERT INTO users (
 			id,
 			email,
@@ -46,7 +55,10 @@ func (r *UserRepository) CreateUser(ctx context.Context, item user.User) error {
 }
 
 // GetUser возвращает активного пользователя по внутреннему UUID
-func (r *UserRepository) GetUser(ctx context.Context, id string) (user.User, error) {
+func (r *UserRepository) GetUser(ctx context.Context, id string) (item user.User, err error) {
+	ctx, operation := r.telemetry.startRepositoryOperation(ctx, "SELECT", "users")
+	defer func() { finishRepositoryOperation(operation, err) }()
+
 	row := r.db.QueryRowContext(ctx, `
 		SELECT
 			id,
@@ -62,8 +74,11 @@ func (r *UserRepository) GetUser(ctx context.Context, id string) (user.User, err
 	return scanUser(row)
 }
 
-// GetUserByEmail возвращает активного пользователя по нормализованному email
-func (r *UserRepository) GetUserByEmail(ctx context.Context, email string) (user.User, error) {
+// GetUserByEmail возвращает активного пользователя по нормализованной электронной почте
+func (r *UserRepository) GetUserByEmail(ctx context.Context, email string) (item user.User, err error) {
+	ctx, operation := r.telemetry.startRepositoryOperation(ctx, "SELECT", "users")
+	defer func() { finishRepositoryOperation(operation, err) }()
+
 	row := r.db.QueryRowContext(ctx, `
 		SELECT
 			id,
@@ -80,7 +95,10 @@ func (r *UserRepository) GetUserByEmail(ctx context.Context, email string) (user
 }
 
 // FindOrCreateUserByEmail возвращает пользователя по email или создает нового
-func (r *UserRepository) FindOrCreateUserByEmail(ctx context.Context, email string, now time.Time) (user.User, error) {
+func (r *UserRepository) FindOrCreateUserByEmail(ctx context.Context, email string, now time.Time) (item user.User, err error) {
+	ctx, operation := r.telemetry.startRepositoryOperation(ctx, "INSERT", "users")
+	defer func() { finishRepositoryOperation(operation, err) }()
+
 	row := r.db.QueryRowContext(ctx, `
 		INSERT INTO users (
 			id,

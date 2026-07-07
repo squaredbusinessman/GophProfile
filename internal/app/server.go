@@ -11,6 +11,7 @@ import (
 
 // RunHTTPServer запускает HTTP-сервер и корректно останавливает его по сигналу
 func RunHTTPServer(ctx context.Context, cfg config.Config, handler http.Handler, logger zerolog.Logger) error {
+	ctx = ContextWithLogger(ctx, logger)
 	server := &http.Server{
 		Addr:         cfg.HTTP.Addr,
 		Handler:      handler,
@@ -21,7 +22,7 @@ func RunHTTPServer(ctx context.Context, cfg config.Config, handler http.Handler,
 
 	errCh := make(chan error, 1)
 	go func() {
-		logger.Info().Str("addr", cfg.HTTP.Addr).Msg("http server started")
+		LoggerFromContext(ctx).Info().Str("addr", cfg.HTTP.Addr).Msg("http server started")
 		err := server.ListenAndServe()
 		if errors.Is(err, http.ErrServerClosed) {
 			err = nil
@@ -38,7 +39,7 @@ func RunHTTPServer(ctx context.Context, cfg config.Config, handler http.Handler,
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.HTTP.ShutdownTimeout)
 	defer cancel()
 
-	logger.Info().Dur("timeout", cfg.HTTP.ShutdownTimeout).Msg("http server shutting down")
+	LoggerFromContext(ctx).Info().Dur("timeout", cfg.HTTP.ShutdownTimeout).Msg("http server shutting down")
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		return err
 	}
