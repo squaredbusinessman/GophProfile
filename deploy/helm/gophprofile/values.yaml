@@ -191,6 +191,18 @@ migrations:
     repository: postgres
     tag: 16-alpine
     pullPolicy: IfNotPresent
+  backoffLimit: 3
+  activeDeadlineSeconds: 300
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
   hook:
     enabled: true
+    configMapWeight: "-10"
+    jobWeight: "-5"
+    configMapDeletePolicy: before-hook-creation
     deletePolicy: before-hook-creation,hook-succeeded

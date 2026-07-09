@@ -1,0 +1,24 @@
+{{- if .Values.migrations.enabled }}
+{{- $migrationFiles := .Files.Glob "files/migrations/*.up.sql" }}
+{{- if eq (len $migrationFiles) 0 }}
+{{- fail "migrations.enabled=true but no files were found in files/migrations/*.up.sql" }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "gophprofile.migrationConfigMapName" . }}
+  labels:
+    {{- include "gophprofile.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migrate
+  {{- if .Values.migrations.hook.enabled }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": {{ .Values.migrations.hook.configMapWeight | quote }}
+    "helm.sh/hook-delete-policy": {{ .Values.migrations.hook.configMapDeletePolicy | quote }}
+  {{- end }}
+data:
+  {{- range $path, $_ := $migrationFiles }}
+  {{ base $path }}: |-
+{{ $.Files.Get $path | indent 4 }}
+  {{- end }}
+{{- end }}

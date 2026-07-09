@@ -84,8 +84,22 @@ Secret name. Allows users to provide an existing Secret.
 {{- end -}}
 
 {{/*
+Migration ConfigMap name.
+*/}}
+{{- define "gophprofile.migrationConfigMapName" -}}
+{{- printf "%s-migrations" (include "gophprofile.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{/*
 Common image string.
 */}}
 {{- define "gophprofile.image" -}}
 {{- printf "%s:%s" .Values.image.repository .Values.image.tag -}}
+{{- end -}}
+
+{{/*
+Migration image string.
+*/}}
+{{- define "gophprofile.migrationImage" -}}
+{{- printf "%s:%s" .Values.migrations.image.repository .Values.migrations.image.tag -}}
 {{- end -}}
