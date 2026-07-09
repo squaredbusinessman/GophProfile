@@ -1,0 +1,167 @@
+# Default values for the GophProfile Helm chart.
+#
+# This file is the public deployment contract. Environment-specific files should
+# override these values instead of editing templates directly.
+
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  repository: gophprofile
+  tag: local
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+config:
+  appEnv: local
+  logLevel: info
+  logFormat: json
+  otel:
+    enabled: false
+    exporterOtlpEndpoint: ""
+    exporterOtlpInsecure: true
+    tracesSampler: parentbased_always_on
+    tracesSamplerArg: "1"
+  http:
+    addr: ":8080"
+    defaultAvatarPath: /app/default_avatar.png
+    corsAllowedOrigins: "http://localhost,http://localhost:3000,http://localhost:5173"
+    rateLimitRps: "20"
+    rateLimitBurst: "40"
+  kafka:
+    brokers: ""
+    consumerGroup: gophprofile-avatar-worker
+  s3:
+    endpoint: ""
+    bucket: gophprofile-avatars
+    usePathStyle: true
+    region: us-east-1
+  vault:
+    enabled: false
+    addr: ""
+    kvMount: secret
+    servicePath: gophprofile
+    timeout: 5s
+
+secret:
+  create: true
+  existingSecret: ""
+  values:
+    databaseUrl: ""
+    s3AccessKey: ""
+    s3SecretKey: ""
+    vaultToken: ""
+
+server:
+  enabled: true
+  replicaCount: 2
+  command:
+    - /app/server
+  ports:
+    http: 8080
+    metrics: 9090
+  env:
+    otelServiceName: gophprofile-server
+    metricsAddr: ":9090"
+    kafkaClientId: gophprofile-server
+  service:
+    type: ClusterIP
+    port: 80
+    metricsPort: 9090
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+worker:
+  enabled: true
+  replicaCount: 1
+  command:
+    - /app/worker
+  ports:
+    metrics: 9091
+  env:
+    otelServiceName: gophprofile-worker
+    metricsAddr: ":9091"
+    kafkaClientId: gophprofile-worker
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+ingress:
+  enabled: false
+  className: ""
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+  hosts:
+    - host: gophprofile.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+autoscaling:
+  server:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+  worker:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  labels: {}
+
+networkPolicy:
+  enabled: false
+  ingressNamespaceSelector: {}
+  monitoringNamespaceSelector: {}
+  egressNamespaceSelectors: []
+
+migrations:
+  enabled: true
+  image:
+    repository: postgres
+    tag: 16-alpine
+    pullPolicy: IfNotPresent
+  hook:
+    enabled: true
+    deletePolicy: before-hook-creation,hook-succeeded
