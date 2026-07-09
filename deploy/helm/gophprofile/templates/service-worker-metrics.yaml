@@ -1,0 +1,18 @@
+{{- if .Values.worker.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "gophprofile.fullname" . }}-worker-metrics
+  labels:
+    {{- include "gophprofile.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  type: {{ .Values.worker.service.type }}
+  selector:
+    {{- include "gophprofile.componentSelectorLabels" (dict "Chart" .Chart "Release" .Release "Values" .Values "component" "worker") | nindent 4 }}
+  ports:
+    - name: metrics
+      port: {{ .Values.worker.service.metricsPort }}
+      targetPort: metrics
+      protocol: TCP
+{{- end }}

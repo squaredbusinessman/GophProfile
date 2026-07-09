@@ -92,6 +92,19 @@ server:
     type: ClusterIP
     port: 80
     metricsPort: 9090
+  probes:
+    readiness:
+      path: /health
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      timeoutSeconds: 3
+      failureThreshold: 3
+    liveness:
+      path: /health
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      timeoutSeconds: 3
+      failureThreshold: 3
   resources:
     requests:
       cpu: 100m
@@ -111,6 +124,22 @@ worker:
     otelServiceName: gophprofile-worker
     metricsAddr: ":9091"
     kafkaClientId: gophprofile-worker
+  service:
+    type: ClusterIP
+    metricsPort: 9091
+  probes:
+    readiness:
+      path: /metrics
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      timeoutSeconds: 3
+      failureThreshold: 3
+    liveness:
+      path: /metrics
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      timeoutSeconds: 3
+      failureThreshold: 3
   resources:
     requests:
       cpu: 100m

@@ -1,0 +1,96 @@
+{{- if .Values.worker.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "gophprofile.fullname" . }}-worker
+  labels:
+    {{- include "gophprofile.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  {{- if not .Values.autoscaling.worker.enabled }}
+  replicas: {{ .Values.worker.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "gophprofile.componentSelectorLabels" (dict "Chart" .Chart "Release" .Release "Values" .Values "component" "worker") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "gophprofile.componentSelectorLabels" (dict "Chart" .Chart "Release" .Release "Values" .Values "component" "worker") | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "gophprofile.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: worker
+          image: {{ include "gophprofile.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            {{- toYaml .Values.worker.command | nindent 12 }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.worker.ports.metrics }}
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "gophprofile.configMapName" . }}
+          env:
+            - name: OTEL_SERVICE_NAME
+              value: {{ .Values.worker.env.otelServiceName | quote }}
+            - name: METRICS_ADDR
+              value: {{ .Values.worker.env.metricsAddr | quote }}
+            - name: KAFKA_CLIENT_ID
+              value: {{ .Values.worker.env.kafkaClientId | quote }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "gophprofile.secretName" . }}
+                  key: DATABASE_URL
+            - name: S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "gophprofile.secretName" . }}
+                  key: S3_ACCESS_KEY
+            - name: S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "gophprofile.secretName" . }}
+                  key: S3_SECRET_KEY
+            - name: VAULT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "gophprofile.secretName" . }}
+                  key: VAULT_TOKEN
+                  optional: true
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.worker.probes.readiness.path }}
+              port: metrics
+            initialDelaySeconds: {{ .Values.worker.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.worker.probes.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.worker.probes.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.worker.probes.readiness.failureThreshold }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.worker.probes.liveness.path }}
+              port: metrics
+            initialDelaySeconds: {{ .Values.worker.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.worker.probes.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.worker.probes.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.worker.probes.liveness.failureThreshold }}
+          resources:
+            {{- toYaml .Values.worker.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+{{- end }}
