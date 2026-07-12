@@ -1,0 +1,115 @@
+groups:
+- name: gophprofile-http
+  rules:
+  - record: gophprofile_http_server_requests_total
+    expr: http_server_request_count_total{job="gophprofile-server"}
+  - record: gophprofile_http_server_request_duration_seconds_bucket
+    expr: http_server_request_duration_seconds_bucket{job="gophprofile-server"}
+  - alert: HighErrorRate
+    expr: |
+      sum(rate(gophprofile_http_server_requests_total{status_class="5xx"}[5m]))
+      /
+      clamp_min(sum(rate(gophprofile_http_server_requests_total[5m])), 0.001)
+      > 0.10
+    for: 1m
+    labels:
+      severity: critical
+      service: server
+      runbook: docs/runbooks/observability-alerts.md#higherrorrate
+    annotations:
+      summary: "Доля HTTP 5xx выше 10%"
+      description: "За последние 5 минут больше 10% HTTP-запросов завершились server error"
+  - alert: HighResponseTime
+    expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (
+              rate(gophprofile_http_server_request_duration_seconds_bucket[5m])
+            )
+          ) > 5
+    for: 2m
+    labels:
+      severity: warning
+      service: server
+      runbook: docs/runbooks/observability-alerts.md#highresponsetime
+    annotations:
+      summary: "p95 HTTP latency выше 5 секунд"
+      description: "95-й перцентиль времени ответа API держится выше 5 секунд"
+- name: gophprofile-background
+  rules:
+  - alert: OutboxBacklogGrowing
+    expr: |
+      max(app_outbox_pending_count)
+      -
+      max(min_over_time(app_outbox_pending_count[10m]))
+      > 20
+    for: 5m
+    labels:
+      severity: warning
+      service: outbox
+      runbook: docs/runbooks/observability-alerts.md#outboxbackloggrowing
+    annotations:
+      summary: "Очередь outbox растёт"
+      description: "Количество ожидающих событий outbox выросло больше чем на 20 за 10 минут"
+  - alert: OutboxEventTooOld
+    expr: max(app_outbox_oldest_age_seconds) > 300
+    for: 5m
+    labels:
+      severity: critical
+      service: outbox
+      runbook: docs/runbooks/observability-alerts.md#outboxeventtooold
+    annotations:
+      summary: "Старейшее событие outbox ожидает больше 5 минут"
+      description: "Фоновая публикация не успевает отправлять события или не может подтвердить отправку"
+  - alert: AvatarDeadLetterDetected
+    expr: sum(increase(app_avatar_processing_count_total{result="dead_letter"}[5m])) > 0
+    for: 0m
+    labels:
+      severity: critical
+      service: worker
+      runbook: docs/runbooks/observability-alerts.md#avatardeadletterdetected
+    annotations:
+      summary: "Обнаружено dead-letter событие обработки аватара"
+      description: "Worker исчерпал попытки обработки хотя бы одного сообщения за последние 5 минут"
+- name: gophprofile-dependencies
+  rules:
+  - alert: KafkaConsumerLagHigh
+    expr: max by (consumergroup, topic) (kafka_consumergroup_lag) > 100
+    for: 5m
+    labels:
+      severity: warning
+      service: kafka
+      runbook: docs/runbooks/observability-alerts.md#kafkaconsumerlaghigh
+    annotations:
+      summary: "Kafka consumer lag выше 100 сообщений"
+      description: "Consumer group {{ $labels.consumergroup }} отстаёт от topic {{ $labels.topic }}"
+  - alert: DatabasePoolSaturated
+    expr: |
+      (
+        sum by (job, instance) (db_client_connection_count{db_client_connection_state="used"})
+        /
+        clamp_min(sum by (job, instance) (db_client_connection_max), 1)
+        > 0.90
+      )
+      and
+      sum by (job, instance) (db_client_connection_max) > 0
+    for: 2m
+    labels:
+      severity: warning
+      service: postgres
+      runbook: docs/runbooks/observability-alerts.md#databasepoolsaturated
+    annotations:
+      summary: "PostgreSQL connection pool заполнен больше чем на 90%"
+      description: "Экземпляр {{ $labels.job }} {{ $labels.instance }} почти исчерпал доступные соединения"
+- name: gophprofile-availability
+  rules:
+  - alert: WorkerDown
+    expr: up{job="gophprofile-worker"} == 0
+    for: 1m
+    labels:
+      severity: critical
+      service: worker
+      runbook: docs/runbooks/observability-alerts.md#workerdown
+    annotations:
+      summary: "Worker недоступен для Prometheus"
+      description: "Prometheus не может собрать метрики worker больше 1 минуты"

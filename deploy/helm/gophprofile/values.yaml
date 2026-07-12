@@ -175,6 +175,14 @@ ingress:
 serviceMonitor:
   enabled: false
   interval: 30s
+  scrapeTimeout: 10s
+  path: /metrics
+  jobLabel: gophprofile.io/metrics-job
+  labels: {}
+  namespaceSelector: {}
+
+prometheusRule:
+  enabled: false
   labels: {}
 
 networkPolicy:

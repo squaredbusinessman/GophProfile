@@ -6,6 +6,7 @@ metadata:
   labels:
     {{- include "gophprofile.labels" . | nindent 4 }}
     app.kubernetes.io/component: worker
+    gophprofile.io/metrics-job: gophprofile-worker
 spec:
   type: {{ .Values.worker.service.type }}
   selector:
