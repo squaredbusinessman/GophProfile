@@ -7,7 +7,7 @@ metadata:
     {{- include "gophprofile.labels" . | nindent 4 }}
     app.kubernetes.io/component: server
 spec:
-  {{- if not .Values.autoscaling.server.enabled }}
+  {{- if not .Values.server.autoscaling.enabled }}
   replicas: {{ .Values.server.replicaCount }}
   {{- end }}
   selector:
