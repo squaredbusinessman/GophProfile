@@ -195,7 +195,9 @@ func (r *OutboxRepository) ListPendingOutboxEvents(ctx context.Context, limit in
 		return nil, fmt.Errorf("list pending outbox events: %w", err)
 	}
 	defer func() {
-		_ = rows.Close()
+		if closeErr := rows.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("close pending outbox event rows: %w", closeErr))
+		}
 	}()
 
 	events = make([]outbox.Event, 0)

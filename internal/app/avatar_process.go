@@ -22,14 +22,19 @@ const (
 
 // AvatarMetadataStore описывает доступ обработчика к метаданным аватара
 type AvatarMetadataStore interface {
+	// GetAvatarIncludingDeleted возвращает аватар по идентификатору, включая мягко удалённые записи.
 	GetAvatarIncludingDeleted(ctx context.Context, id string) (avatar.Avatar, error)
+	// MarkAvatarReady сохраняет размеры и ключи миниатюр после успешной обработки.
 	MarkAvatarReady(ctx context.Context, id string, width int, height int, thumb100Key string, thumb300Key string, updatedAt time.Time) error
+	// UpdateAvatarStatus меняет статус аватара без изменения объектных ключей.
 	UpdateAvatarStatus(ctx context.Context, id string, status avatar.Status, updatedAt time.Time) error
 }
 
 // AvatarObjectStore описывает чтение и запись объектов аватара
 type AvatarObjectStore interface {
+	// Get открывает объект аватара и возвращает поток вместе с метаданными.
 	Get(ctx context.Context, key string) (io.ReadCloser, storages3.ObjectMetadata, error)
+	// Put сохраняет объект по ключу с известным размером и MIME-типом.
 	Put(ctx context.Context, key string, reader io.Reader, size int64, contentType string) error
 }
 
@@ -141,13 +146,17 @@ func (s *AvatarProcessService) processAvatar(ctx context.Context, message Avatar
 	if err != nil {
 		return "", retryableProcessError{err: err}
 	}
-	defer func() {
-		_ = body.Close()
-	}()
 
 	decoded, err := imageproc.Decode(body)
+	closeErr := body.Close()
 	if err != nil {
+		if closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("close avatar original body: %w", closeErr))
+		}
 		return "", permanentProcessError{err: err}
+	}
+	if closeErr != nil {
+		return "", retryableProcessError{err: fmt.Errorf("close avatar original body: %w", closeErr)}
 	}
 
 	thumbnails, err := imageproc.BuildThumbnails(decoded.Image, imageproc.DefaultThumbnailSizes)
@@ -186,7 +195,7 @@ func (s *AvatarProcessService) publishRetry(ctx context.Context, message AvatarP
 
 	topic := processRetryTopic(message.Attempt)
 	if err := s.producer.Publish(ctx, topic, message.AvatarID, payload, nil); err != nil {
-		return fmt.Errorf("publish avatar retry after %v: %w", cause, err)
+		return fmt.Errorf("publish avatar retry after %w: %w", cause, err)
 	}
 	return nil
 }
@@ -198,7 +207,7 @@ func (s *AvatarProcessService) publishDeadLetter(ctx context.Context, message Av
 		return err
 	}
 	if err := s.producer.Publish(ctx, queuekafka.TopicAvatarProcessDeadLetter, message.AvatarID, payload, nil); err != nil {
-		return fmt.Errorf("publish avatar dead-letter after %v: %w", cause, err)
+		return fmt.Errorf("publish avatar dead-letter after %w: %w", cause, err)
 	}
 	return nil
 }

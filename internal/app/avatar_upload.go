@@ -22,23 +22,29 @@ var ErrUserNotFound = errors.New("user not found")
 
 // UserLookup описывает получение пользователя для операций с аватаром
 type UserLookup interface {
+	// GetUser возвращает активного пользователя по внутреннему идентификатору.
 	GetUser(ctx context.Context, id string) (user.User, error)
 }
 
 // AvatarOutboxStore описывает атомарное сохранение аватара и события outbox
 type AvatarOutboxStore interface {
+	// CreateAvatarWithOutbox сохраняет аватар и событие outbox в одной транзакции.
 	CreateAvatarWithOutbox(ctx context.Context, item avatar.Avatar, event outbox.Event) error
+	// MarkOutboxPublished отмечает событие outbox успешно опубликованным.
 	MarkOutboxPublished(ctx context.Context, id string, publishedAt time.Time) error
+	// MarkOutboxPublishAttemptFailed сохраняет ошибку публикации события outbox.
 	MarkOutboxPublishAttemptFailed(ctx context.Context, id string, publishErr error, updatedAt time.Time) error
 }
 
 // ObjectStore описывает загрузку объекта в хранилище
 type ObjectStore interface {
+	// Put сохраняет объект по ключу с известным размером и MIME-типом.
 	Put(ctx context.Context, key string, reader io.Reader, size int64, contentType string) error
 }
 
 // EventPublisher описывает публикацию события в брокер сообщений
 type EventPublisher interface {
+	// Publish отправляет сообщение в указанную тему с ключом и заголовками трассировки.
 	Publish(ctx context.Context, topic string, key string, payload []byte, headers map[string]string) error
 }
 

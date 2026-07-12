@@ -81,26 +81,35 @@ type HealthCheck func(ctx context.Context) error
 
 // UserResolver описывает сопоставление электронной почты с пользователем
 type UserResolver interface {
+	// ResolveUserByEmail возвращает существующего пользователя или создаёт нового по email.
 	ResolveUserByEmail(ctx context.Context, email string) (app.UserResolveResult, error)
 }
 
 // AvatarUploader описывает загрузку нового аватара
 type AvatarUploader interface {
+	// UploadAvatar принимает проверенный файл и создаёт аватар в состоянии обработки.
 	UploadAvatar(ctx context.Context, req app.AvatarUploadRequest) (app.AvatarUploadResult, error)
 }
 
 // AvatarReader описывает чтение объектов и метаданных аватаров
 type AvatarReader interface {
+	// GetAvatarByID возвращает объект аватара по идентификатору.
 	GetAvatarByID(ctx context.Context, avatarID string, size string, format string) (app.AvatarReadResult, error)
+	// GetLatestAvatarByUserID возвращает последний активный аватар пользователя.
 	GetLatestAvatarByUserID(ctx context.Context, userID string, size string, format string) (app.AvatarReadResult, error)
+	// GetLatestAvatarByEmail возвращает последний активный аватар по email пользователя.
 	GetLatestAvatarByEmail(ctx context.Context, email string, size string, format string) (app.AvatarReadResult, error)
+	// GetAvatarMetadata возвращает публичные метаданные аватара.
 	GetAvatarMetadata(ctx context.Context, avatarID string) (app.AvatarMetadataResult, error)
+	// ListAvatarsByUserID возвращает страницу активных аватаров пользователя.
 	ListAvatarsByUserID(ctx context.Context, userID string, limit int, offset int) (app.AvatarListResult, error)
 }
 
 // AvatarDeleter описывает логическое удаление аватаров
 type AvatarDeleter interface {
+	// DeleteAvatarByID логически удаляет аватар по идентификатору при совпадении владельца.
 	DeleteAvatarByID(ctx context.Context, avatarID string, requesterUserID string) error
+	// DeleteLatestAvatarByUserID логически удаляет последний активный аватар пользователя.
 	DeleteLatestAvatarByUserID(ctx context.Context, targetUserID string, requesterUserID string) error
 }
 
@@ -278,7 +287,9 @@ func (r *Router) handlePublicAvatarByEmail(w http.ResponseWriter, req *http.Requ
 				writeAvatarReadError(w, err)
 				return
 			}
-			writeDefaultAvatar(w, r.defaultAvatar)
+			if err := writeDefaultAvatar(w, r.defaultAvatar); err != nil {
+				r.logInternalError(req.Context(), err, "default avatar write failed")
+			}
 			return
 		}
 		if isInternalAvatarReadError(err) {
@@ -288,10 +299,14 @@ func (r *Router) handlePublicAvatarByEmail(w http.ResponseWriter, req *http.Requ
 		return
 	}
 	defer func() {
-		_ = result.Body.Close()
+		if err := result.Body.Close(); err != nil {
+			r.logInternalError(req.Context(), err, "close public avatar body failed")
+		}
 	}()
 
-	writeAvatarBinary(w, result)
+	if err := writeAvatarBinary(w, result); err != nil {
+		r.logInternalError(req.Context(), err, "public avatar write failed")
+	}
 }
 
 // handleAvatarUpload принимает multipart avatar и запускает обработку
@@ -309,7 +324,9 @@ func (r *Router) handleAvatarUpload(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	defer func() {
-		_ = upload.Close()
+		if err := upload.Close(); err != nil {
+			r.logInternalError(req.Context(), err, "close avatar upload form failed")
+		}
 	}()
 
 	file, err := upload.Open()
@@ -321,7 +338,9 @@ func (r *Router) handleAvatarUpload(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	defer func() {
-		_ = file.Close()
+		if err := file.Close(); err != nil {
+			r.logInternalError(req.Context(), err, "close avatar upload file failed")
+		}
 	}()
 
 	body, err := io.ReadAll(file)
@@ -424,10 +443,14 @@ func (r *Router) handleAvatarByID(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	defer func() {
-		_ = result.Body.Close()
+		if err := result.Body.Close(); err != nil {
+			r.logInternalError(req.Context(), err, "close avatar body failed")
+		}
 	}()
 
-	writeAvatarBinary(w, result)
+	if err := writeAvatarBinary(w, result); err != nil {
+		r.logInternalError(req.Context(), err, "avatar write failed")
+	}
 }
 
 // handleAvatarDeleteByID удаляет avatar по id
@@ -529,7 +552,9 @@ func (r *Router) handleUsers(w http.ResponseWriter, req *http.Request) {
 				writeAvatarReadError(w, err)
 				return
 			}
-			writeDefaultAvatar(w, r.defaultAvatar)
+			if err := writeDefaultAvatar(w, r.defaultAvatar); err != nil {
+				r.logInternalError(req.Context(), err, "default avatar write failed")
+			}
 			return
 		}
 		if isInternalAvatarReadError(err) {
@@ -539,10 +564,14 @@ func (r *Router) handleUsers(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	defer func() {
-		_ = result.Body.Close()
+		if err := result.Body.Close(); err != nil {
+			r.logInternalError(req.Context(), err, "close latest avatar body failed")
+		}
 	}()
 
-	writeAvatarBinary(w, result)
+	if err := writeAvatarBinary(w, result); err != nil {
+		r.logInternalError(req.Context(), err, "latest avatar write failed")
+	}
 }
 
 // handleLatestAvatarDeleteByUser удаляет последнюю активную avatar пользователя
@@ -853,7 +882,7 @@ func writeAvatarDeleteError(w http.ResponseWriter, err error) {
 }
 
 // writeAvatarBinary записывает binary avatar response
-func writeAvatarBinary(w http.ResponseWriter, result app.AvatarReadResult) {
+func writeAvatarBinary(w http.ResponseWriter, result app.AvatarReadResult) error {
 	w.Header().Set("Content-Type", result.ContentType)
 	w.Header().Set("Cache-Control", "max-age=86400")
 	if result.ETag != "" {
@@ -863,14 +892,17 @@ func writeAvatarBinary(w http.ResponseWriter, result app.AvatarReadResult) {
 		w.Header().Set("Content-Length", strconv.FormatInt(result.Size, 10))
 	}
 	w.WriteHeader(http.StatusOK)
-	_, _ = io.Copy(w, result.Body)
+	if _, err := io.Copy(w, result.Body); err != nil {
+		return fmt.Errorf("copy avatar response body: %w", err)
+	}
+	return nil
 }
 
 // writeDefaultAvatar записывает стандартную PNG-заглушку avatar
-func writeDefaultAvatar(w http.ResponseWriter, item DefaultAvatar) {
+func writeDefaultAvatar(w http.ResponseWriter, item DefaultAvatar) error {
 	if len(item.Body) == 0 {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Default avatar unavailable"})
-		return
+		return nil
 	}
 
 	w.Header().Set("Content-Type", item.ContentType)
@@ -878,7 +910,10 @@ func writeDefaultAvatar(w http.ResponseWriter, item DefaultAvatar) {
 	w.Header().Set("ETag", item.ETag)
 	w.Header().Set("Content-Length", strconv.Itoa(len(item.Body)))
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(item.Body)
+	if _, err := w.Write(item.Body); err != nil {
+		return fmt.Errorf("write default avatar response body: %w", err)
+	}
+	return nil
 }
 
 // ensureDefaultAvatarRequest проверяет query параметры для PNG-заглушки avatar
@@ -923,8 +958,8 @@ func paginationParams(req *http.Request) (int, int) {
 
 // writeValidationError записывает HTTP-ответ для ошибки валидации
 func writeValidationError(w http.ResponseWriter, err error) {
-	validationErr, ok := err.(*ValidationError)
-	if !ok {
+	var validationErr *ValidationError
+	if !errors.As(err, &validationErr) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{
 			"error": "Invalid request",
 		})
@@ -950,7 +985,9 @@ func validateRequesterUserID(rawUserID string) (string, error) {
 func writeJSON(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(payload)
+	if err := json.NewEncoder(w).Encode(payload); err != nil {
+		otel.Handle(fmt.Errorf("write json response: %w", err))
+	}
 }
 
 type statusRecorder struct {

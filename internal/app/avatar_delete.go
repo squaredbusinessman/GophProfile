@@ -19,25 +19,33 @@ var ErrAvatarForbidden = errors.New("avatar belongs to another user")
 
 // AvatarDeleteRepository описывает чтение аватаров для операции удаления
 type AvatarDeleteRepository interface {
+	// GetAvatarIncludingDeleted возвращает аватар по идентификатору, включая мягко удалённые записи.
 	GetAvatarIncludingDeleted(ctx context.Context, id string) (avatar.Avatar, error)
+	// ListAvatarsByUser возвращает страницу активных аватаров пользователя.
 	ListAvatarsByUser(ctx context.Context, userID string, limit int, offset int) ([]avatar.Avatar, error)
 }
 
 // AvatarDeleteOutboxStore описывает атомарное удаление аватара и создание события outbox
 type AvatarDeleteOutboxStore interface {
+	// SoftDeleteAvatarWithOutbox помечает аватар удаляемым и создаёт событие удаления в одной транзакции.
 	SoftDeleteAvatarWithOutbox(ctx context.Context, id string, userID string, deletedAt time.Time, event outbox.Event) error
+	// MarkOutboxPublished отмечает событие outbox успешно опубликованным.
 	MarkOutboxPublished(ctx context.Context, id string, publishedAt time.Time) error
+	// MarkOutboxPublishAttemptFailed сохраняет ошибку публикации события outbox.
 	MarkOutboxPublishAttemptFailed(ctx context.Context, id string, publishErr error, updatedAt time.Time) error
 }
 
 // AvatarDeleteWorkerRepository описывает доступ обработчика удаления к данным аватара
 type AvatarDeleteWorkerRepository interface {
+	// GetAvatarIncludingDeleted возвращает аватар по идентификатору, включая мягко удалённые записи.
 	GetAvatarIncludingDeleted(ctx context.Context, id string) (avatar.Avatar, error)
+	// MarkAvatarDeleted переводит аватар в состояние завершённого удаления объектов.
 	MarkAvatarDeleted(ctx context.Context, id string, updatedAt time.Time) error
 }
 
 // AvatarDeleteObjectStore описывает удаление объектов аватара из хранилища
 type AvatarDeleteObjectStore interface {
+	// Delete удаляет объект по ключу и считает отсутствие объекта успешным результатом.
 	Delete(ctx context.Context, key string) error
 }
 

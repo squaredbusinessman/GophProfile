@@ -51,6 +51,7 @@ func RunWorker(ctx context.Context, cfg config.Config, logger zerolog.Logger, ou
 
 // ProcessMessageConsumer описывает получение сообщений из именованных тем Kafka
 type ProcessMessageConsumer interface {
+	// Consume читает указанные темы и вызывает handler для каждого сообщения.
 	Consume(ctx context.Context, topics []string, handler func(context.Context, queuekafka.Message) error) error
 }
 

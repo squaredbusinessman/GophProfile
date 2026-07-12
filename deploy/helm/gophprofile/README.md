@@ -75,6 +75,18 @@ image:
 
 ## Минимальный install
 
+Перед установкой нужно передать значения, которые зависят от окружения. Без них
+pod сможет отрендериться, но приложение не подключится к внешним зависимостям:
+
+- `image.repository`, `image.tag`, `image.pullPolicy`;
+- `config.kafka.brokers`;
+- `config.s3.endpoint`, `config.s3.bucket`, `config.s3.usePathStyle`;
+- `secret.values.databaseUrl` или ключ `DATABASE_URL` в `secret.existingSecret`;
+- `secret.values.s3AccessKey` / `secret.values.s3SecretKey` или ключи
+  `S3_ACCESS_KEY` / `S3_SECRET_KEY` в `secret.existingSecret`;
+- `config.otel.*`, если включён экспорт трассировок;
+- `ingress.*`, если API должен быть доступен извне через Ingress.
+
 ```bash
 helm upgrade --install gophprofile deploy/helm/gophprofile \
   --namespace gophprofile \

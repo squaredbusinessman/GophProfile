@@ -68,8 +68,10 @@ func NewTelemetry(ctx context.Context, cfg config.Config) (*Telemetry, error) {
 		}
 		promExporter, err := otelprom.New(otelprom.WithRegisterer(registry))
 		if err != nil {
-			_ = exporter.Shutdown(ctx)
-			return nil, fmt.Errorf("create Prometheus exporter: %w", err)
+			return nil, errors.Join(
+				fmt.Errorf("create Prometheus exporter: %w", err),
+				fmt.Errorf("shutdown OTLP trace exporter after Prometheus exporter error: %w", exporter.Shutdown(ctx)),
+			)
 		}
 		tp = sdktrace.NewTracerProvider(
 			sdktrace.WithResource(res),

@@ -37,7 +37,7 @@ func NewClient(cfg config.VaultConfig) *Client {
 }
 
 // ReadKV2 читает секрет из хранилища Vault KV v2
-func (c *Client) ReadKV2(ctx context.Context, path string) (map[string]string, error) {
+func (c *Client) ReadKV2(ctx context.Context, path string) (result map[string]string, resultErr error) {
 	secretURL, err := c.secretURL(path)
 	if err != nil {
 		return nil, err
@@ -54,7 +54,9 @@ func (c *Client) ReadKV2(ctx context.Context, path string) (map[string]string, e
 		return nil, fmt.Errorf("read vault secret: %w", err)
 	}
 	defer func() {
-		_ = resp.Body.Close()
+		if err := resp.Body.Close(); err != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("close vault secret response body: %w", err))
+		}
 	}()
 
 	if resp.StatusCode == http.StatusNotFound {
@@ -73,7 +75,7 @@ func (c *Client) ReadKV2(ctx context.Context, path string) (map[string]string, e
 }
 
 // HealthCheck проверяет доступность Vault API
-func (c *Client) HealthCheck(ctx context.Context) error {
+func (c *Client) HealthCheck(ctx context.Context) (resultErr error) {
 	healthURL := c.addr + "/v1/sys/health"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, healthURL, nil)
 	if err != nil {
@@ -85,7 +87,9 @@ func (c *Client) HealthCheck(ctx context.Context) error {
 		return fmt.Errorf("check vault health: %w", err)
 	}
 	defer func() {
-		_ = resp.Body.Close()
+		if err := resp.Body.Close(); err != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("close vault health response body: %w", err))
+		}
 	}()
 
 	if resp.StatusCode == http.StatusOK || resp.StatusCode == httpStatusStandby {

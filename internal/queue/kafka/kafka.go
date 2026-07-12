@@ -2,6 +2,7 @@ package kafka
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -93,8 +94,10 @@ func NewClient(brokers []string, clientID string, consumerGroup string) (*Client
 	telemetry, err := newKafkaTelemetry()
 	if err != nil {
 		producer.Close()
-		_ = consumer.Close()
-		return nil, fmt.Errorf("create kafka telemetry: %w", err)
+		return nil, errors.Join(
+			fmt.Errorf("create kafka telemetry: %w", err),
+			fmt.Errorf("close kafka consumer after telemetry error: %w", consumer.Close()),
+		)
 	}
 
 	return &Client{
@@ -255,8 +258,18 @@ func (c *Client) HealthCheck(ctx context.Context) error {
 }
 
 // Close закрывает клиент Kafka и дожидается отправки буфера производителя
-func (c *Client) Close() {
-	_ = c.consumer.Close()
-	c.producer.Flush(int((5 * time.Second).Milliseconds()))
-	c.producer.Close()
+func (c *Client) Close() error {
+	var errs []error
+	if c.consumer != nil {
+		if err := c.consumer.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("close kafka consumer: %w", err))
+		}
+	}
+	if c.producer != nil {
+		if remaining := c.producer.Flush(int((5 * time.Second).Milliseconds())); remaining > 0 {
+			errs = append(errs, fmt.Errorf("flush kafka producer: %d undelivered messages", remaining))
+		}
+		c.producer.Close()
+	}
+	return errors.Join(errs...)
 }

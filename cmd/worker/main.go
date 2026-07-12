@@ -24,7 +24,10 @@ func main() {
 
 	cfg, err := app.LoadConfigForProcess(ctx, "worker")
 	if err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "load config: %v\n", err)
+		if _, writeErr := fmt.Fprintf(os.Stderr, "load config: %v\n", err); writeErr != nil {
+			stop()
+			os.Exit(1)
+		}
 		stop()
 		os.Exit(1)
 	}
@@ -60,14 +63,20 @@ func main() {
 		logger.Fatal().Str("error_type", app.ErrorType(err)).Msg("register postgres pool metrics")
 	}
 	defer func() {
-		_ = db.Close()
+		if err := db.Close(); err != nil {
+			logger.Error().Str("error_type", app.ErrorType(err)).Msg("close postgres connection pool")
+		}
 	}()
 
 	kafkaClient, err := queuekafka.NewClient(cfg.Kafka.Brokers, cfg.Kafka.ClientID, cfg.Kafka.ConsumerGroup)
 	if err != nil {
 		logger.Fatal().Str("error_type", app.ErrorType(err)).Msg("create kafka client")
 	}
-	defer kafkaClient.Close()
+	defer func() {
+		if err := kafkaClient.Close(); err != nil {
+			logger.Error().Str("error_type", app.ErrorType(err)).Msg("close kafka client")
+		}
+	}()
 
 	s3Client, err := storages3.NewClient(cfg.S3)
 	if err != nil {

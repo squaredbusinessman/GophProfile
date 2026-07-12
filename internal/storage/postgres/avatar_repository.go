@@ -29,7 +29,11 @@ func (r *AvatarRepository) ReadAvatarOperationalStats(ctx context.Context) (coun
 	if err != nil {
 		return nil, 0, fmt.Errorf("read avatar count by status: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("close avatar count rows: %w", closeErr))
+		}
+	}()
 
 	countByStatus = make(map[avatar.Status]int64)
 	for rows.Next() {
@@ -230,7 +234,9 @@ func (r *AvatarRepository) ListAvatarsByUser(ctx context.Context, userID string,
 		return nil, fmt.Errorf("list avatars by user: %w", err)
 	}
 	defer func() {
-		_ = rows.Close()
+		if closeErr := rows.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("close avatars by user rows: %w", closeErr))
+		}
 	}()
 
 	items = make([]avatar.Avatar, 0)

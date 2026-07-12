@@ -333,7 +333,7 @@ func parseEndpoint(rawEndpoint string) (string, bool, error) {
 
 	parsed, err := url.Parse(rawEndpoint)
 	if err != nil {
-		return "", false, fmt.Errorf("%w: endpoint parse error: %v", ErrInvalidConfig, err)
+		return "", false, fmt.Errorf("%w: endpoint parse error: %w", ErrInvalidConfig, err)
 	}
 
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
