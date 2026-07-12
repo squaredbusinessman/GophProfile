@@ -17,7 +17,9 @@ FROM alpine:3.22
 
 WORKDIR /app
 
-RUN apk add --no-cache ca-certificates libstdc++
+RUN apk add --no-cache ca-certificates libstdc++ \
+    && addgroup -S -g 65532 nonroot \
+    && adduser -S -D -H -u 65532 -G nonroot nonroot
 
 COPY --from=build /out/server /app/server
 COPY --from=build /out/worker /app/worker
@@ -25,6 +27,8 @@ COPY web/frontend/src/assets/default_avatar.png /app/default_avatar.png
 
 ENV DEFAULT_AVATAR_PATH=/app/default_avatar.png
 
-EXPOSE 8080
+USER 65532:65532
+
+EXPOSE 8080 9090 9091
 
 ENTRYPOINT ["/app/server"]

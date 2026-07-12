@@ -251,6 +251,30 @@ spec:
 `securityContext`, admission policies и политики кластера вроде Kyverno или
 OPA Gatekeeper, если они доступны в окружении.
 
+### Реализация в Helm chart
+
+Chart создаёт `ServiceAccount`, но не создаёт `Role` или `ClusterRole`, потому
+что server, worker и migration job не используют Kubernetes API. Это минимальная
+RBAC-модель: отдельный identity есть, лишних разрешений нет.
+
+Runtime security задан двумя слоями:
+
+- в Dockerfile image запускается от пользователя `65532:65532`;
+- в Helm values заданы `podSecurityContext` и `containerSecurityContext`.
+
+Контейнеры запускаются с `runAsNonRoot`, `seccompProfile: RuntimeDefault`,
+`readOnlyRootFilesystem: true`, `allowPrivilegeEscalation: false` и `drop:
+[ALL]` для Linux capabilities.
+
+NetworkPolicy включается через `networkPolicy.enabled=true`. Для server
+разрешён входящий HTTP-трафик от namespace ingress-controller и metrics-трафик
+от monitoring namespace. Для worker входящий business HTTP не открыт, разрешён
+только metrics-трафик от monitoring namespace. Egress описан отдельным списком
+правил в values: DNS, Postgres, Kafka, S3-compatible storage и OTLP. В
+production values эти правила нужно сузить через `namespaceSelector`,
+`podSelector` или `ipBlock`, потому что стандартный Kubernetes `NetworkPolicy`
+не умеет выбирать destination по DNS-имени Service.
+
 ## 5. Упаковать проект в Helm Chart
 
 Необходимо упаковать конфигурацию всех компонентов в Helm Chart для удобного

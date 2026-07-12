@@ -187,9 +187,50 @@ prometheusRule:
 
 networkPolicy:
   enabled: false
-  ingressNamespaceSelector: {}
-  monitoringNamespaceSelector: {}
-  egressNamespaceSelectors: []
+  ingress:
+    ingressController:
+      namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: ingress-nginx
+      podSelector: {}
+    monitoring:
+      namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
+      podSelector: {}
+  egress:
+    # DNS is required before the app can resolve Kubernetes Services such as
+    # Postgres, Kafka, S3-compatible storage, or an OTLP collector.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Standard NetworkPolicy cannot target a Service DNS name. Production values
+    # should narrow these rules with namespaceSelector, podSelector, or ipBlock.
+    - ports:
+        - protocol: TCP
+          port: 5432
+    - ports:
+        - protocol: TCP
+          port: 9092
+    - ports:
+        - protocol: TCP
+          port: 9000
+        - protocol: TCP
+          port: 443
+    - ports:
+        - protocol: TCP
+          port: 4317
+        - protocol: TCP
+          port: 4318
 
 migrations:
   enabled: true
