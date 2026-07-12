@@ -1,0 +1,483 @@
+openapi: 3.0.3
+info:
+  title: GophProfile API
+  version: 0.1.0
+  description: REST API для загрузки, чтения и удаления пользовательских аватаров.
+servers:
+  - url: http://localhost:8080
+    description: Local server
+paths:
+  /health:
+    get:
+      summary: Проверить состояние server и внешних зависимостей
+      operationId: getHealth
+      responses:
+        "200":
+          description: Сервис и зависимости доступны
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+        "503":
+          description: Одна или несколько зависимостей недоступны
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+  /api/v1/users/resolve:
+    post:
+      summary: Найти или создать пользователя по email
+      operationId: resolveUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserResolveRequest"
+      responses:
+        "200":
+          description: Пользователь найден или создан
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserResolveResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/Error"
+  /api/v1/avatars:
+    post:
+      summary: Загрузить новый avatar
+      operationId: uploadAvatar
+      parameters:
+        - $ref: "#/components/parameters/UserIDHeader"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: JPEG, PNG или WebP файл до 10 MiB.
+      responses:
+        "201":
+          description: Avatar принят и поставлен на обработку
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AvatarUploadResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "404":
+          $ref: "#/components/responses/Error"
+        "413":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/Error"
+  /api/v1/avatar:
+    get:
+      summary: Получить последний avatar пользователя по email
+      operationId: getAvatarByEmail
+      parameters:
+        - name: email
+          in: query
+          required: true
+          schema:
+            type: string
+            format: email
+        - $ref: "#/components/parameters/AvatarSize"
+        - $ref: "#/components/parameters/AvatarFormat"
+      responses:
+        "200":
+          description: Binary avatar. Если пользователь или avatar не найден, может вернуться default PNG avatar.
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/webp:
+              schema:
+                type: string
+                format: binary
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "409":
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+  /api/v1/avatars/{avatar_id}:
+    get:
+      summary: Получить avatar по id
+      operationId: getAvatarById
+      parameters:
+        - $ref: "#/components/parameters/AvatarID"
+        - $ref: "#/components/parameters/AvatarSize"
+        - $ref: "#/components/parameters/AvatarFormat"
+      responses:
+        "200":
+          $ref: "#/components/responses/AvatarBinary"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+    delete:
+      summary: Удалить avatar по id
+      operationId: deleteAvatarById
+      parameters:
+        - $ref: "#/components/parameters/AvatarID"
+        - $ref: "#/components/parameters/UserIDHeader"
+      responses:
+        "204":
+          description: Avatar удалён
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+  /api/v1/avatars/{avatar_id}/metadata:
+    get:
+      summary: Получить metadata avatar
+      operationId: getAvatarMetadata
+      parameters:
+        - $ref: "#/components/parameters/AvatarID"
+      responses:
+        "200":
+          description: Metadata avatar
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AvatarMetadata"
+        "404":
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+  /api/v1/users/{user_id}/avatar:
+    get:
+      summary: Получить последний avatar пользователя
+      operationId: getLatestAvatarByUserId
+      parameters:
+        - $ref: "#/components/parameters/UserIDPath"
+        - $ref: "#/components/parameters/AvatarSize"
+        - $ref: "#/components/parameters/AvatarFormat"
+      responses:
+        "200":
+          $ref: "#/components/responses/AvatarBinary"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "409":
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+    delete:
+      summary: Удалить последний avatar пользователя
+      operationId: deleteLatestAvatarByUserId
+      parameters:
+        - $ref: "#/components/parameters/UserIDPath"
+        - $ref: "#/components/parameters/UserIDHeader"
+      responses:
+        "204":
+          description: Avatar удалён
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+  /api/v1/users/{user_id}/avatars:
+    get:
+      summary: Получить список active avatars пользователя
+      operationId: listUserAvatars
+      parameters:
+        - $ref: "#/components/parameters/UserIDPath"
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 20
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: Страница avatars
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AvatarListResponse"
+        "500":
+          $ref: "#/components/responses/Error"
+components:
+  parameters:
+    UserIDHeader:
+      name: X-User-ID
+      in: header
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: UUID пользователя, выполняющего upload/delete.
+    UserIDPath:
+      name: user_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    AvatarID:
+      name: avatar_id
+      in: path
+      required: true
+      schema:
+        type: string
+    AvatarSize:
+      name: size
+      in: query
+      required: false
+      schema:
+        type: string
+        enum:
+          - original
+          - 100x100
+          - 300x300
+        default: original
+    AvatarFormat:
+      name: format
+      in: query
+      required: false
+      schema:
+        type: string
+        enum:
+          - jpg
+          - jpeg
+          - png
+          - webp
+      description: Если задан, должен совпадать с фактическим MIME-типом объекта.
+  responses:
+    AvatarBinary:
+      description: Binary avatar
+      content:
+        image/jpeg:
+          schema:
+            type: string
+            format: binary
+        image/png:
+          schema:
+            type: string
+            format: binary
+        image/webp:
+          schema:
+            type: string
+            format: binary
+    Error:
+      description: Error response
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    ValidationError:
+      description: Validation error response
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ValidationErrorResponse"
+  schemas:
+    HealthResponse:
+      type: object
+      required:
+        - status
+        - service
+        - version
+        - timestamp
+        - checks
+      properties:
+        status:
+          type: string
+          example: ok
+        service:
+          type: string
+          example: gophprofile-server
+        version:
+          type: string
+          example: dev
+        timestamp:
+          type: string
+          format: date-time
+        checks:
+          type: object
+          additionalProperties:
+            type: string
+          example:
+            postgres: ok
+            kafka: ok
+            s3: ok
+    UserResolveRequest:
+      type: object
+      required:
+        - email
+      properties:
+        email:
+          type: string
+          format: email
+    UserResolveResponse:
+      type: object
+      required:
+        - id
+        - user_id
+        - email
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    AvatarUploadResponse:
+      type: object
+      required:
+        - id
+        - user_id
+        - url
+        - status
+        - created_at
+      properties:
+        id:
+          type: string
+        user_id:
+          type: string
+          format: uuid
+        url:
+          type: string
+          example: /api/v1/avatars/avatar-id
+        status:
+          type: string
+          example: processing
+        width:
+          type: integer
+        height:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+    AvatarMetadata:
+      type: object
+      required:
+        - id
+        - user_id
+        - file_name
+        - mime_type
+        - size_bytes
+        - width
+        - height
+        - status
+        - url
+        - thumbnails
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+        user_id:
+          type: string
+          format: uuid
+        file_name:
+          type: string
+        mime_type:
+          type: string
+          example: image/png
+        size_bytes:
+          type: integer
+          format: int64
+        width:
+          type: integer
+          nullable: true
+        height:
+          type: integer
+          nullable: true
+        status:
+          type: string
+          example: ready
+        url:
+          type: string
+        thumbnails:
+          type: array
+          items:
+            $ref: "#/components/schemas/AvatarThumbnail"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    AvatarThumbnail:
+      type: object
+      required:
+        - size
+        - url
+      properties:
+        size:
+          type: string
+          example: 100x100
+        url:
+          type: string
+    AvatarListResponse:
+      type: object
+      required:
+        - items
+        - limit
+        - offset
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AvatarMetadata"
+        limit:
+          type: integer
+        offset:
+          type: integer
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+        details:
+          type: string
+    ValidationErrorResponse:
+      allOf:
+        - $ref: "#/components/schemas/ErrorResponse"
