@@ -15,6 +15,7 @@ import (
 	"github.com/squaredbusinessman/GophProfile/internal/httpapi"
 	"github.com/squaredbusinessman/GophProfile/internal/observability"
 	queuekafka "github.com/squaredbusinessman/GophProfile/internal/queue/kafka"
+	"github.com/squaredbusinessman/GophProfile/internal/resilience"
 	"github.com/squaredbusinessman/GophProfile/internal/storage/postgres"
 	storages3 "github.com/squaredbusinessman/GophProfile/internal/storage/s3"
 )
@@ -36,6 +37,11 @@ func main() {
 
 	logger := app.NewLogger(cfg)
 	ctx = app.ContextWithLogger(ctx, logger)
+	breakerCfg := resilience.CircuitBreakerConfig{
+		Enabled:          cfg.CircuitBreaker.Enabled,
+		FailureThreshold: cfg.CircuitBreaker.FailureThreshold,
+		OpenTimeout:      cfg.CircuitBreaker.OpenTimeout,
+	}
 	telemetry, err := observability.NewTelemetry(ctx, cfg)
 	if err != nil {
 		logger.Fatal().Str("error_type", app.ErrorType(err)).Msg("initialize telemetry")
@@ -75,7 +81,7 @@ func main() {
 		}
 	}()
 
-	s3Client, err := storages3.NewClient(cfg.S3)
+	s3Client, err := storages3.NewClient(cfg.S3, breakerCfg)
 	if err != nil {
 		logger.Fatal().Str("error_type", app.ErrorType(err)).Msg("create s3 client")
 	}
@@ -83,7 +89,7 @@ func main() {
 		logger.Fatal().Str("error_type", app.ErrorType(err)).Msg("ensure local s3 bucket")
 	}
 
-	kafkaClient, err := queuekafka.NewClient(cfg.Kafka.Brokers, cfg.Kafka.ClientID, cfg.Kafka.ConsumerGroup)
+	kafkaClient, err := queuekafka.NewClient(cfg.Kafka.Brokers, cfg.Kafka.ClientID, cfg.Kafka.ConsumerGroup, breakerCfg)
 	if err != nil {
 		logger.Fatal().Str("error_type", app.ErrorType(err)).Msg("create kafka client")
 	}
@@ -93,15 +99,15 @@ func main() {
 		}
 	}()
 
-	userRepo, err := postgres.NewUserRepository(db)
+	userRepo, err := postgres.NewUserRepository(db, breakerCfg)
 	if err != nil {
 		logger.Fatal().Str("error_type", app.ErrorType(err)).Msg("create user repository")
 	}
-	outboxRepo, err := postgres.NewOutboxRepository(db)
+	outboxRepo, err := postgres.NewOutboxRepository(db, breakerCfg)
 	if err != nil {
 		logger.Fatal().Str("error_type", app.ErrorType(err)).Msg("create outbox repository")
 	}
-	avatarRepo, err := postgres.NewAvatarRepository(db)
+	avatarRepo, err := postgres.NewAvatarRepository(db, breakerCfg)
 	if err != nil {
 		logger.Fatal().Str("error_type", app.ErrorType(err)).Msg("create avatar repository")
 	}

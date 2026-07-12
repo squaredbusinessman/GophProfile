@@ -29,3 +29,6 @@ data:
   VAULT_KV_MOUNT: {{ .Values.config.vault.kvMount | quote }}
   VAULT_SERVICE_PATH: {{ .Values.config.vault.servicePath | quote }}
   VAULT_TIMEOUT: {{ .Values.config.vault.timeout | quote }}
+  CIRCUIT_BREAKER_ENABLED: {{ .Values.config.circuitBreaker.enabled | quote }}
+  CIRCUIT_BREAKER_FAILURE_THRESHOLD: {{ .Values.config.circuitBreaker.failureThreshold | quote }}
+  CIRCUIT_BREAKER_OPEN_TIMEOUT: {{ .Values.config.circuitBreaker.openTimeout | quote }}

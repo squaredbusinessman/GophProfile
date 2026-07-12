@@ -9,25 +9,33 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/squaredbusinessman/GophProfile/internal/domain/user"
+	"github.com/squaredbusinessman/GophProfile/internal/resilience"
 )
 
 // UserRepository сохраняет и читает пользователей в PostgreSQL
 type UserRepository struct {
 	db        *sql.DB
 	telemetry postgresTelemetry
+	breaker   *resilience.CircuitBreaker
 }
 
 // NewUserRepository создаёт репозиторий пользователей в PostgreSQL
-func NewUserRepository(db *sql.DB) (*UserRepository, error) {
+func NewUserRepository(db *sql.DB, breakerCfg ...resilience.CircuitBreakerConfig) (*UserRepository, error) {
 	telemetry, err := newPostgresTelemetry()
 	if err != nil {
 		return nil, fmt.Errorf("create user repository telemetry: %w", err)
 	}
-	return &UserRepository{db: db, telemetry: telemetry}, nil
+	return &UserRepository{db: db, telemetry: telemetry, breaker: newPostgresBreaker(breakerCfg)}, nil
 }
 
 // CreateUser сохраняет нового пользователя
 func (r *UserRepository) CreateUser(ctx context.Context, item user.User) (err error) {
+	done, err := r.breaker.Allow()
+	if err != nil {
+		return err
+	}
+	defer func() { finishPostgresBreaker(done, err) }()
+
 	ctx, operation := r.telemetry.startRepositoryOperation(ctx, "INSERT", "users")
 	defer func() { finishRepositoryOperation(operation, err) }()
 
@@ -56,6 +64,12 @@ func (r *UserRepository) CreateUser(ctx context.Context, item user.User) (err er
 
 // GetUser возвращает активного пользователя по внутреннему UUID
 func (r *UserRepository) GetUser(ctx context.Context, id string) (item user.User, err error) {
+	done, err := r.breaker.Allow()
+	if err != nil {
+		return user.User{}, err
+	}
+	defer func() { finishPostgresBreaker(done, err) }()
+
 	ctx, operation := r.telemetry.startRepositoryOperation(ctx, "SELECT", "users")
 	defer func() { finishRepositoryOperation(operation, err) }()
 
@@ -76,6 +90,12 @@ func (r *UserRepository) GetUser(ctx context.Context, id string) (item user.User
 
 // GetUserByEmail возвращает активного пользователя по нормализованной электронной почте
 func (r *UserRepository) GetUserByEmail(ctx context.Context, email string) (item user.User, err error) {
+	done, err := r.breaker.Allow()
+	if err != nil {
+		return user.User{}, err
+	}
+	defer func() { finishPostgresBreaker(done, err) }()
+
 	ctx, operation := r.telemetry.startRepositoryOperation(ctx, "SELECT", "users")
 	defer func() { finishRepositoryOperation(operation, err) }()
 
@@ -96,6 +116,12 @@ func (r *UserRepository) GetUserByEmail(ctx context.Context, email string) (item
 
 // FindOrCreateUserByEmail возвращает пользователя по email или создает нового
 func (r *UserRepository) FindOrCreateUserByEmail(ctx context.Context, email string, now time.Time) (item user.User, err error) {
+	done, err := r.breaker.Allow()
+	if err != nil {
+		return user.User{}, err
+	}
+	defer func() { finishPostgresBreaker(done, err) }()
+
 	ctx, operation := r.telemetry.startRepositoryOperation(ctx, "INSERT", "users")
 	defer func() { finishRepositoryOperation(operation, err) }()
 

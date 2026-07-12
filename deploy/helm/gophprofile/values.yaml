@@ -66,6 +66,10 @@ config:
     kvMount: secret
     servicePath: gophprofile
     timeout: 5s
+  circuitBreaker:
+    enabled: true
+    failureThreshold: "5"
+    openTimeout: 30s
 
 secret:
   create: true

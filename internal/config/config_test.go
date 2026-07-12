@@ -64,6 +64,9 @@ func TestLoadUsesLocalDefaults(t *testing.T) {
 	if cfg.Observability.LogLevel != "info" || cfg.Observability.LogFormat != "json" {
 		t.Fatalf("logging defaults = %q/%q, want info/json", cfg.Observability.LogLevel, cfg.Observability.LogFormat)
 	}
+	if !cfg.CircuitBreaker.Enabled || cfg.CircuitBreaker.FailureThreshold != 5 || cfg.CircuitBreaker.OpenTimeout != 30*time.Second {
+		t.Fatalf("CircuitBreaker defaults = %#v, want enabled threshold 5 timeout 30s", cfg.CircuitBreaker)
+	}
 }
 
 // TestLoadReadsEnvironment проверяет чтение конфигурации из переменных окружения
@@ -89,6 +92,9 @@ func TestLoadReadsEnvironment(t *testing.T) {
 	t.Setenv("METRICS_ADDR", "127.0.0.1:19090")
 	t.Setenv("LOG_LEVEL", "warn")
 	t.Setenv("LOG_FORMAT", "json")
+	t.Setenv("CIRCUIT_BREAKER_ENABLED", "false")
+	t.Setenv("CIRCUIT_BREAKER_FAILURE_THRESHOLD", "3")
+	t.Setenv("CIRCUIT_BREAKER_OPEN_TIMEOUT", "15s")
 
 	cfg := Load()
 
@@ -139,6 +145,9 @@ func TestLoadReadsEnvironment(t *testing.T) {
 	}
 	if cfg.Observability.MetricsAddr != "127.0.0.1:19090" || cfg.Observability.LogLevel != "warn" || cfg.Observability.LogFormat != "json" {
 		t.Fatalf("metrics/logging overrides were not loaded: %#v", cfg.Observability)
+	}
+	if cfg.CircuitBreaker.Enabled || cfg.CircuitBreaker.FailureThreshold != 3 || cfg.CircuitBreaker.OpenTimeout != 15*time.Second {
+		t.Fatalf("CircuitBreaker overrides = %#v, want disabled threshold 3 timeout 15s", cfg.CircuitBreaker)
 	}
 }
 

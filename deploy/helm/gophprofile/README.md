@@ -213,6 +213,10 @@ config:
     bucket: gophprofile-avatars
     usePathStyle: false
     region: us-east-1
+  circuitBreaker:
+    enabled: true
+    failureThreshold: "5"
+    openTimeout: 30s
 
 secret:
   values:
@@ -322,6 +326,25 @@ Runtime hardening:
 Kubernetes `NetworkPolicy` не умеет выбирать egress destination по DNS-имени
 Service, поэтому production values должны сузить egress через
 `namespaceSelector`, `podSelector` или `ipBlock`.
+
+## Production readiness
+
+Chart задаёт resource requests/limits для `server`, `worker` и migration job,
+а HPA включается через `server.autoscaling.enabled` и
+`worker.autoscaling.enabled`. Когда HPA выключен, используется
+`replicaCount`, и Kubernetes Service балансирует трафик между готовыми
+репликами `server`.
+
+Приложение поддерживает graceful shutdown через `SIGTERM`: HTTP server
+завершает входящие запросы в пределах `HTTP_SHUTDOWN_TIMEOUT`, worker ждёт
+остановки consumer loop в пределах `WORKER_SHUTDOWN_TIMEOUT`, telemetry
+отправляет накопленные spans/metrics перед выходом.
+
+Circuit breaker включается через `config.circuitBreaker.enabled` и защищает
+runtime-обращения к PostgreSQL repositories, Kafka producer/healthcheck и
+S3-compatible storage. Значения `failureThreshold` и `openTimeout` попадают в
+env `CIRCUIT_BREAKER_FAILURE_THRESHOLD` и `CIRCUIT_BREAKER_OPEN_TIMEOUT`.
+Бизнес-результаты `not found` не открывают breaker.
 
 ## Known limitations
 

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	confluent "github.com/confluentinc/confluent-kafka-go/v2/kafka"
+	"github.com/squaredbusinessman/GophProfile/internal/resilience"
 	"go.opentelemetry.io/otel"
 	semconv "go.opentelemetry.io/otel/semconv/v1.40.0"
 	"go.opentelemetry.io/otel/trace"
@@ -35,6 +36,7 @@ type Client struct {
 	consumer      consumerAPI
 	consumerGroup string
 	telemetry     kafkaTelemetry
+	breaker       *resilience.CircuitBreaker
 }
 
 // Message содержит тело, заголовки и метаданные сообщения Kafka
@@ -70,7 +72,7 @@ type consumerAPI interface {
 }
 
 // NewClient создаёт клиент Kafka на базе производителя и потребителя Confluent
-func NewClient(brokers []string, clientID string, consumerGroup string) (*Client, error) {
+func NewClient(brokers []string, clientID string, consumerGroup string, breakerCfg ...resilience.CircuitBreakerConfig) (*Client, error) {
 	producer, err := confluent.NewProducer(&confluent.ConfigMap{
 		"bootstrap.servers": strings.Join(brokers, ","),
 		"client.id":         clientID,
@@ -100,11 +102,17 @@ func NewClient(brokers []string, clientID string, consumerGroup string) (*Client
 		)
 	}
 
+	cfg := resilience.CircuitBreakerConfig{}
+	if len(breakerCfg) > 0 {
+		cfg = breakerCfg[0]
+	}
+
 	return &Client{
 		producer:      producer,
 		consumer:      consumer,
 		consumerGroup: consumerGroup,
 		telemetry:     telemetry,
+		breaker:       resilience.NewCircuitBreaker("kafka", cfg),
 	}, nil
 }
 
@@ -128,15 +136,17 @@ func (c *Client) Publish(ctx context.Context, topic string, key string, payload 
 	otel.GetTextMapPropagator().Inject(spanCtx, &carrier)
 	delivery := make(chan confluent.Event, 1)
 
-	err := c.producer.Produce(&confluent.Message{
-		TopicPartition: confluent.TopicPartition{
-			Topic:     &topic,
-			Partition: confluent.PartitionAny,
-		},
-		Key:     []byte(key),
-		Value:   payload,
-		Headers: carrier,
-	}, delivery)
+	err := c.callKafka(func() error {
+		return c.producer.Produce(&confluent.Message{
+			TopicPartition: confluent.TopicPartition{
+				Topic:     &topic,
+				Partition: confluent.PartitionAny,
+			},
+			Key:     []byte(key),
+			Value:   payload,
+			Headers: carrier,
+		}, delivery)
+	})
 	if err != nil {
 		operation.finish(kafkaResultError, err)
 		return fmt.Errorf("produce kafka message: %w", err)
@@ -242,7 +252,10 @@ func (c *Client) Consume(ctx context.Context, topics []string, handler func(cont
 func (c *Client) HealthCheck(ctx context.Context) error {
 	errCh := make(chan error, 1)
 	go func() {
-		_, err := c.producer.GetMetadata(nil, false, 1000)
+		err := c.callKafka(func() error {
+			_, err := c.producer.GetMetadata(nil, false, 1000)
+			return err
+		})
 		errCh <- err
 	}()
 
@@ -255,6 +268,14 @@ func (c *Client) HealthCheck(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// callKafka выполняет запрос к Kafka producer через circuit breaker.
+func (c *Client) callKafka(operation func() error) error {
+	if c.breaker == nil {
+		return operation()
+	}
+	return c.breaker.Execute(operation)
 }
 
 // Close закрывает клиент Kafka и дожидается отправки буфера производителя

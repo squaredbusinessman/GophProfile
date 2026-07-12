@@ -184,6 +184,9 @@ docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.observabili
 | `METRICS_ADDR` | отдельный HTTP-адрес метрик, `:9090` для server и `:9091` для worker |
 | `LOG_LEVEL` | уровень логов, безопасный fallback `info` |
 | `LOG_FORMAT` | `json` по умолчанию, `console` разрешён только при `APP_ENV=local` |
+| `CIRCUIT_BREAKER_ENABLED` | включает circuit breaker для PostgreSQL, Kafka и S3, по умолчанию `true` |
+| `CIRCUIT_BREAKER_FAILURE_THRESHOLD` | число последовательных ошибок до открытия breaker, по умолчанию `5` |
+| `CIRCUIT_BREAKER_OPEN_TIMEOUT` | время до пробной half-open попытки, по умолчанию `30s` |
 
 Metrics HTTP server запускается и корректно останавливается даже в no-op режиме.
 Базовый `deploy/docker-compose.yml` содержит приложение и его хранилища, а
@@ -254,6 +257,24 @@ scrape. Поэтому backlog, статусы аватаров и размер 
 после перезапуска процесса и не зависят от локального состояния счётчиков.
 Dashboard показывает accepted uploads, ready/failed processing, completed
 deletes, outbox backlog, возраст старейшего события и объём оригиналов.
+
+## Production Readiness
+
+Graceful shutdown реализован для `server`, `worker` и metrics server:
+`SIGTERM` отменяет root context, HTTP server вызывает `Shutdown`, worker ждёт
+завершения consumer loop в пределах `WORKER_SHUTDOWN_TIMEOUT`, а telemetry
+flush выполняется перед выходом процесса.
+
+Circuit breaker включён для внешних зависимостей PostgreSQL, Kafka и S3.
+После серии последовательных ошибок breaker временно открывается и быстро
+возвращает ошибку без нового обращения к деградирующей зависимости. После
+`CIRCUIT_BREAKER_OPEN_TIMEOUT` допускается одна half-open попытка; успешная
+попытка закрывает breaker, ошибка открывает его снова. Бизнес-ошибки вроде
+`not found` не считаются отказом зависимости.
+
+Rate limiting применяется к API routes с префиксом `/api/`; `/health` и
+`/metrics` не зависят от лимитера. Ошибки внешних операций оборачиваются через
+`%w`, логируются без секретов и учитываются в telemetry.
 
 Prometheus также забирает consumer lag из Kafka exporter и container resource
 metrics из cAdvisor. Loki хранит локальные данные семь дней. Alloy и cAdvisor
