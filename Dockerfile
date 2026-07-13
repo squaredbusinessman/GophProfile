@@ -10,8 +10,9 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=1 GOOS=linux go build -tags musl -o /out/server ./cmd/server
-RUN CGO_ENABLED=1 GOOS=linux go build -tags musl -o /out/worker ./cmd/worker
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=1 GOOS=linux go build -tags musl -o /out/server ./cmd/server \
+    && CGO_ENABLED=1 GOOS=linux go build -tags musl -o /out/worker ./cmd/worker
 
 FROM alpine:3.22
 

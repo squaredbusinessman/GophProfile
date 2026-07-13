@@ -60,8 +60,10 @@ docker push registry.example.com/gophprofile:0.1.0
 Для Rancher Desktop локальный Kubernetes часто использует runtime внутри VM.
 Чтобы pod увидел локальный image, соберите image внутри Rancher Desktop:
 
+Из корня репозитория:
+
 ```bash
-rdctl shell docker build -t gophprofile:local /Users/evgenijantropov/my_projects/GophProfile
+rdctl shell docker build -t gophprofile:local "$(pwd)"
 ```
 
 И используйте:
@@ -121,71 +123,62 @@ curl http://127.0.0.1:9091/metrics
 
 ## Локальный деплой в Rancher Desktop
 
-Локальный smoke-сценарий:
-
-1. Убедиться, что выбран контекст Rancher Desktop:
-
-```bash
-kubectl config current-context
-```
-
-Ожидаемо:
-
-```text
-rancher-desktop
-```
-
-2. Установить Prometheus Operator, если проверяются `ServiceMonitor` и
-   `PrometheusRule`:
+В репозитории есть воспроизводимый сценарий, который объединяет результаты всех
+трёх спринтов: запускает Rancher Desktop, прикладные зависимости, frontend,
+Helm-релиз приложения и полный набор наблюдаемости:
 
 ```bash
-helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-helm repo update
-
-helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
-  --namespace monitoring \
-  --create-namespace
+./scripts/kubernetes-local.sh up
 ```
 
-3. Поднять локальные smoke-зависимости:
+Сценарий использует:
+
+- `deploy/kubernetes/local/dependencies.yaml` для PostgreSQL, Kafka, MinIO,
+  Jaeger и frontend;
+- `deploy/kubernetes/local/gophprofile-values.yaml` для локальной настройки
+  application chart;
+- `deploy/kubernetes/local/observability.yaml` для Loki, Alloy и Kafka Exporter;
+- `deploy/kubernetes/local/alloy.alloy` для безопасного сбора JSON-журналов
+  server и worker через Kubernetes API;
+- `deploy/kubernetes/local/kube-prometheus-stack-values.yaml` для Prometheus
+  Operator, Prometheus, Grafana, Alertmanager и сбора метрик cAdvisor;
+- `deploy/observability/grafana/dashboards` для версионируемых панелей Grafana.
+
+Источники данных Grafana имеют стабильные UID `prometheus`, `loki`, `jaeger` и
+`alertmanager`. Отдельные метки ConfigMap не позволяют конфигурации другого
+Grafana-релиза перезаписать источники или панели GophProfile.
+
+Секрет `gophprofile-local-secrets` создаётся до установки Helm chart. Это
+необходимо, потому что migration Job выполняется как `pre-install` hook и должен
+получить `DATABASE_URL` до создания обычных ресурсов релиза. Application chart
+подключает этот Secret через `secret.existingSecret`.
+
+Сценарий всегда передаёт `--context rancher-desktop` в `kubectl` и
+`--kube-context rancher-desktop` в Helm. Глобальный выбранный контекст
+пользователя не меняется.
+
+Проверка ресурсов и журналов:
 
 ```bash
-kubectl create namespace gophprofile --dry-run=client -o yaml | kubectl apply -f -
-kubectl apply -f .tz-work/k8s-smoke-dependencies.yaml
-kubectl -n gophprofile wait --for=condition=available \
-  deployment/gophprofile-postgres \
-  deployment/gophprofile-kafka \
-  deployment/gophprofile-minio \
-  --timeout=10m
+./scripts/kubernetes-local.sh status
+./scripts/kubernetes-local.sh logs --follow
 ```
 
-4. Собрать image внутри Rancher Desktop VM:
+Остановка с сохранением данных PostgreSQL, Kafka, MinIO и Loki:
 
 ```bash
-rdctl shell docker build -t gophprofile:local /Users/evgenijantropov/my_projects/GophProfile
+./scripts/kubernetes-local.sh down
 ```
 
-5. Установить chart:
+Для отладки прикладной части набор наблюдаемости можно не устанавливать:
 
 ```bash
-helm upgrade --install gophprofile deploy/helm/gophprofile \
-  --namespace gophprofile \
-  --create-namespace \
-  -f .tz-work/k8s-smoke-values.yaml
+./scripts/kubernetes-local.sh up --no-monitoring
 ```
 
-6. Проверить workloads:
-
-```bash
-kubectl -n gophprofile get pods,deploy,svc,endpoints
-kubectl -n gophprofile logs deploy/gophprofile-server --tail=100
-kubectl -n gophprofile logs deploy/gophprofile-worker --tail=100
-```
-
-Важно: полный локальный стенд с Prometheus stack, Kafka, MinIO и PostgreSQL
-требователен к памяти. Если `kubectl` начинает отвечать `TLS handshake timeout`,
-увеличьте memory limit Rancher Desktop или временно отключите Grafana /
-Alertmanager.
+В этом режиме сценарий явно отключает `ServiceMonitor` и `PrometheusRule`, чтобы
+Helm chart устанавливался без соответствующих CRD. Для приёмки объединённого
+результата трёх спринтов нужно запускать обычный режим без этого параметра.
 
 ## Production values
 

@@ -63,7 +63,61 @@ docker compose -f docker-compose.yml -f docker-compose.observability.yml up --bu
 docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.observability.yml down
 ```
 
-## Адреса
+## Объединённый локальный Kubernetes-стенд
+
+Для проверки совместного результата трёх спринтов используется сценарий
+Rancher Desktop:
+
+```bash
+./scripts/kubernetes-local.sh up
+```
+
+Он запускает Kubernetes, приложение, frontend, PostgreSQL, Kafka, MinIO,
+миграции, Jaeger, Prometheus, Grafana, Loki, Alloy, Alertmanager и Kafka
+Exporter. Prometheus получает метрики приложения через `ServiceMonitor`, lag
+Kafka через Kafka Exporter, а CPU, память и сеть контейнеров через kubelet и
+cAdvisor. Alloy читает JSON-журналы server и worker через Kubernetes API и
+отправляет их в Loki. Полное описание находится в
+`deploy/helm/gophprofile/README.md`.
+
+Требования: Rancher Desktop, `rdctl`, `kubectl`, `helm`, `curl`, `jq`, не менее
+6 ГБ памяти и 4 CPU для виртуальной машины. Сценарий сам увеличит ресурсы
+Rancher Desktop, если текущее значение меньше. Для первой загрузки Helm chart и
+контейнерных образов нужен доступ к сети.
+
+После запуска доступны:
+
+- frontend и API: `http://127.0.0.1:8080/web/`;
+- MinIO Console: `http://127.0.0.1:9001`;
+- Jaeger: `http://127.0.0.1:16686`;
+- Prometheus: `http://127.0.0.1:9090`;
+- Grafana: `http://127.0.0.1:3001` (`admin` / `admin`);
+- Loki: `http://127.0.0.1:3100/ready`;
+- Alertmanager: `http://127.0.0.1:9093`;
+- Alloy: `http://127.0.0.1:12345`.
+
+После готовности полная сквозная проверка запускается командой:
+
+```bash
+./scripts/observability-smoke.sh
+```
+
+Управление стендом выполняется тем же сценарием:
+
+```bash
+./scripts/kubernetes-local.sh status
+./scripts/kubernetes-local.sh logs --follow
+./scripts/kubernetes-local.sh down
+```
+
+Команда `down` сохраняет данные PostgreSQL, Kafka, MinIO и Loki. Повторный
+`up --no-build` проверен и не требует очистки томов или ручного удаления Pod.
+Сценарий управляет только релизами `gophprofile` и `gophprofile-monitoring` и не
+удаляет чужие Helm-релизы из того же кластера. Если после `down` в Rancher
+Desktop остаются Pod, их владельца нужно определить через `helm list -A` и
+останавливать соответствующий релиз, а не отдельный Pod.
+
+## Адреса Docker Compose
 
 - Server API: `http://localhost:8080`
 - Healthcheck: `http://localhost:8080/health`

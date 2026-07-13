@@ -1,0 +1,91 @@
+# Локальные значения для объединённого стенда трёх спринтов в Rancher Desktop
+image:
+  repository: gophprofile
+  tag: local
+  pullPolicy: Never
+
+config:
+  appEnv: local
+  logLevel: info
+  logFormat: json
+  otel:
+    enabled: true
+    exporterOtlpEndpoint: gophprofile-jaeger:4317
+    exporterOtlpInsecure: true
+    tracesSampler: parentbased_always_on
+    tracesSamplerArg: "1"
+  http:
+    corsAllowedOrigins: "http://localhost,http://localhost:8080,http://gophprofile.local"
+  kafka:
+    brokers: gophprofile-kafka:9092
+    consumerGroup: gophprofile-avatar-worker
+  s3:
+    endpoint: http://gophprofile-minio:9000
+    bucket: gophprofile-avatars
+    usePathStyle: true
+    region: us-east-1
+
+# Секрет создаётся манифестом зависимостей до запуска Helm hooks миграции
+secret:
+  create: false
+  existingSecret: gophprofile-local-secrets
+
+server:
+  replicaCount: 1
+  autoscaling:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 3
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+
+worker:
+  replicaCount: 1
+  autoscaling:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 3
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+
+ingress:
+  enabled: true
+  className: traefik
+  hosts:
+    - host: gophprofile.local
+      paths:
+        - path: /
+          pathType: Prefix
+
+serviceMonitor:
+  enabled: true
+  labels:
+    release: gophprofile-monitoring
+
+prometheusRule:
+  enabled: true
+  labels:
+    release: gophprofile-monitoring
+
+networkPolicy:
+  enabled: true
+  ingress:
+    ingressController:
+      namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector: {}
+    monitoring:
+      namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
+      podSelector: {}
+    serverAdditional:
+      - from:
+          - podSelector:
+              matchLabels:
+                app.kubernetes.io/name: frontend
+                app.kubernetes.io/part-of: gophprofile-local
+        ports:
+          - protocol: TCP
+            port: http

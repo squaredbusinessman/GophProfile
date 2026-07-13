@@ -1,7 +1,6 @@
-# Default values for the GophProfile Helm chart.
-#
-# This file is the public deployment contract. Environment-specific files should
-# override these values instead of editing templates directly.
+# Значения Helm chart GophProfile по умолчанию
+# Этот файл задаёт публичный контракт развёртывания
+# Файлы окружений должны переопределять значения без изменения шаблонов
 
 nameOverride: ""
 fullnameOverride: ""
@@ -202,9 +201,9 @@ networkPolicy:
         matchLabels:
           kubernetes.io/metadata.name: monitoring
       podSelector: {}
+    serverAdditional: []
   egress:
-    # DNS is required before the app can resolve Kubernetes Services such as
-    # Postgres, Kafka, S3-compatible storage, or an OTLP collector.
+    # DNS нужен приложению для поиска сервисов PostgreSQL, Kafka, S3 и OTLP
     - to:
         - namespaceSelector:
             matchLabels:
@@ -217,8 +216,8 @@ networkPolicy:
           port: 53
         - protocol: TCP
           port: 53
-    # Standard NetworkPolicy cannot target a Service DNS name. Production values
-    # should narrow these rules with namespaceSelector, podSelector, or ipBlock.
+    # NetworkPolicy не умеет выбирать сервис по DNS-имени
+    # В production эти правила нужно сузить через namespaceSelector, podSelector или ipBlock
     - ports:
         - protocol: TCP
           port: 5432
@@ -244,6 +243,7 @@ migrations:
     pullPolicy: IfNotPresent
   backoffLimit: 3
   activeDeadlineSeconds: 300
+  ttlSecondsAfterFinished: 300
   resources:
     requests:
       cpu: 50m
@@ -255,5 +255,5 @@ migrations:
     enabled: true
     configMapWeight: "-10"
     jobWeight: "-5"
-    configMapDeletePolicy: before-hook-creation
-    deletePolicy: before-hook-creation,hook-succeeded
+    configMapDeletePolicy: hook-failed
+    deletePolicy: hook-failed

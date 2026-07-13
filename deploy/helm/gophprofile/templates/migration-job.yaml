@@ -2,7 +2,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: {{ include "gophprofile.fullname" . }}-migrate
+  name: {{ include "gophprofile.fullname" . }}-migrate-{{ .Release.Revision }}
   labels:
     {{- include "gophprofile.labels" . | nindent 4 }}
     app.kubernetes.io/component: migrate
@@ -15,13 +15,14 @@ metadata:
 spec:
   backoffLimit: {{ .Values.migrations.backoffLimit }}
   activeDeadlineSeconds: {{ .Values.migrations.activeDeadlineSeconds }}
+  ttlSecondsAfterFinished: {{ .Values.migrations.ttlSecondsAfterFinished }}
   template:
     metadata:
       labels:
         {{- include "gophprofile.componentSelectorLabels" (dict "Chart" .Chart "Release" .Release "Values" .Values "component" "migrate") | nindent 8 }}
     spec:
       restartPolicy: Never
-      serviceAccountName: {{ include "gophprofile.serviceAccountName" . }}
+      automountServiceAccountToken: false
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}

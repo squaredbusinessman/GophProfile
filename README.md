@@ -157,6 +157,91 @@ docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.observabili
 В локальном compose `server` и `worker` автоматически создают MinIO bucket из
 `S3_BUCKET`, если он еще отсутствует.
 
+## Объединённый локальный Kubernetes-стенд
+
+Итоги трёх спринтов запускаются в Rancher Desktop одной командой:
+
+```bash
+./scripts/kubernetes-local.sh
+```
+
+Это не отдельная демонстрация третьего спринта. В одном кластере совместно
+работают:
+
+- результат первого спринта: HTTP API, frontend, PostgreSQL, миграции, Kafka,
+  MinIO и фоновая обработка;
+- результат второго спринта: Helm chart, `Ingress`, `HorizontalPodAutoscaler`,
+  `NetworkPolicy`, `ServiceMonitor` и `PrometheusRule`;
+- результат третьего спринта: OpenTelemetry, Prometheus, Grafana, Loki, Alloy,
+  Jaeger, Alertmanager, Kafka Exporter и метрики контейнеров cAdvisor.
+
+Сценарий запускает Rancher Desktop с Kubernetes и Moby, при необходимости
+увеличивает ресурсы виртуальной машины до 6 ГБ памяти и 4 CPU, собирает образы
+backend и frontend, создаёт темы Kafka, применяет миграции и дожидается
+функциональной готовности всех компонентов. Панели Grafana, источники данных и
+правила оповещений создаются автоматически.
+
+Предварительно должны быть установлены Rancher Desktop, `rdctl`, `kubectl`,
+`helm`, `curl` и `jq`. Для первого запуска нужен доступ к сети, чтобы получить
+Helm chart и отсутствующие контейнерные образы. Сценарий не меняет глобальные
+контексты Docker и Kubernetes: каждой команде явно передаётся контекст
+`rancher-desktop`.
+
+После готовности доступны:
+
+- frontend: `http://127.0.0.1:8080/web/`;
+- API и healthcheck: `http://127.0.0.1:8080/api/` и
+  `http://127.0.0.1:8080/health`;
+- MinIO Console: `http://127.0.0.1:9001` (`minioadmin` / `minioadmin`);
+- Jaeger: `http://127.0.0.1:16686`;
+- Prometheus: `http://127.0.0.1:9090`;
+- Grafana: `http://127.0.0.1:3001` (`admin` / `admin`);
+- Loki readiness: `http://127.0.0.1:3100/ready`;
+- Alertmanager: `http://127.0.0.1:9093`;
+- Alloy: `http://127.0.0.1:12345`.
+
+Сквозная проверка загрузки, обработки, чтения и удаления аватара, а также
+метрик, трассировки и связанного журнала:
+
+```bash
+./scripts/observability-smoke.sh
+```
+
+Повторный запуск без пересборки уже существующих образов:
+
+```bash
+./scripts/kubernetes-local.sh up --no-build
+```
+
+Состояние и журналы процессов:
+
+```bash
+./scripts/kubernetes-local.sh status
+./scripts/kubernetes-local.sh logs --follow
+```
+
+Остановка всех компонентов стенда:
+
+```bash
+./scripts/kubernetes-local.sh down
+```
+
+При остановке Helm-релизы приложения и мониторинга удаляются, локальные
+`Deployment` уменьшаются до нуля, а данные PostgreSQL, Kafka, MinIO и Loki
+остаются в `PersistentVolumeClaim`. Следующий `up` использует сохранённые данные
+и восстанавливает нужное число Pod.
+
+Для отладки только прикладной части наблюдаемость можно пропустить:
+
+```bash
+./scripts/kubernetes-local.sh up --no-monitoring
+```
+
+Этот режим не проверяет объединённый результат трёх спринтов. Файлы локального
+стенда находятся в `deploy/kubernetes/local`. Они предназначены для проверки и
+разработки, содержат открытые локальные учётные данные и не являются
+production-конфигурацией.
+
 ## Observability
 
 Оба процесса используют единый OpenTelemetry bootstrap. Конфигурация:

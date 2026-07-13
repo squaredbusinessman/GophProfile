@@ -1,0 +1,73 @@
+logging {
+  level  = "info"
+  format = "json"
+}
+
+discovery.kubernetes "application_pods" {
+  role = "pod"
+
+  namespaces {
+    names = ["gophprofile"]
+  }
+}
+
+discovery.relabel "application_logs" {
+  targets = discovery.kubernetes.application_pods.targets
+
+  rule {
+    source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_instance"]
+    regex         = "gophprofile"
+    action        = "keep"
+  }
+
+  rule {
+    source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_component"]
+    regex         = "server|worker"
+    action        = "keep"
+  }
+
+  rule {
+    source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_component"]
+    target_label  = "service"
+  }
+
+  rule {
+    source_labels = ["__meta_kubernetes_pod_container_name"]
+    target_label  = "container"
+  }
+}
+
+loki.source.kubernetes "application" {
+  targets    = discovery.relabel.application_logs.output
+  forward_to = [loki.process.application.receiver]
+}
+
+loki.process "application" {
+  forward_to = [loki.write.local.receiver]
+
+  stage.cri {}
+
+  stage.json {
+    expressions = {
+      environment = "env",
+      level       = "level",
+    }
+  }
+
+  stage.labels {
+    values = {
+      environment = "",
+      level       = "",
+    }
+  }
+
+  stage.label_drop {
+    values = ["detected_level", "service_name", "filename", "job", "instance"]
+  }
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://gophprofile-loki.monitoring.svc.cluster.local:3100/loki/api/v1/push"
+  }
+}
