@@ -24,6 +24,8 @@ var (
 	ErrInvalidKey = errors.New("invalid s3 object key")
 	// ErrInvalidConfig сообщает о недопустимой конфигурации S3
 	ErrInvalidConfig = errors.New("invalid s3 config")
+	// errOperationPanicked отмечает аварийное завершение запроса S3
+	errOperationPanicked = errors.New("s3 operation panicked")
 )
 
 // Client выполняет операции с объектами S3 и записывает их телеметрию
@@ -305,18 +307,26 @@ func (c *Client) Bucket() string {
 	return c.bucket
 }
 
-// callS3 выполняет S3-запрос через circuit breaker и не считает 404 отказом зависимости.
-func (c *Client) callS3(operation func() error) error {
+// callS3 выполняет S3-запрос через автоматический выключатель и не считает 404 отказом зависимости
+func (c *Client) callS3(operation func() error) (err error) {
 	done, err := c.breaker.Allow()
 	if err != nil {
 		return err
 	}
+	defer func() {
+		panicValue := recover()
+		if panicValue != nil {
+			done(errOperationPanicked)
+			panic(panicValue)
+		}
+		if isNotFound(err) {
+			done(nil)
+			return
+		}
+		done(err)
+	}()
+
 	err = operation()
-	if isNotFound(err) {
-		done(nil)
-		return err
-	}
-	done(err)
 	return err
 }
 

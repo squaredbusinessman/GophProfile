@@ -25,7 +25,7 @@ func (r *AvatarRepository) ReadAvatarOperationalStats(ctx context.Context) (coun
 	if err != nil {
 		return nil, 0, err
 	}
-	defer func() { finishPostgresBreaker(done, err) }()
+	defer finishPostgresBreaker(done, &err)
 
 	ctx, operation := r.telemetry.startRepositoryOperation(ctx, "SELECT", "avatars")
 	defer func() { finishRepositoryOperation(operation, err) }()
@@ -89,7 +89,7 @@ func (r *AvatarRepository) CreateAvatar(ctx context.Context, item avatar.Avatar)
 	if err != nil {
 		return err
 	}
-	defer func() { finishPostgresBreaker(done, err) }()
+	defer finishPostgresBreaker(done, &err)
 
 	ctx, operation := r.telemetry.startRepositoryOperation(ctx, "INSERT", "avatars")
 	defer func() { finishRepositoryOperation(operation, err) }()
@@ -149,7 +149,7 @@ func (r *AvatarRepository) GetAvatar(ctx context.Context, id string) (item avata
 	if err != nil {
 		return avatar.Avatar{}, err
 	}
-	defer func() { finishPostgresBreaker(done, err) }()
+	defer finishPostgresBreaker(done, &err)
 
 	ctx, operation := r.telemetry.startRepositoryOperation(ctx, "SELECT", "avatars")
 	defer func() { finishRepositoryOperation(operation, err) }()
@@ -189,7 +189,7 @@ func (r *AvatarRepository) GetAvatarIncludingDeleted(ctx context.Context, id str
 	if err != nil {
 		return avatar.Avatar{}, err
 	}
-	defer func() { finishPostgresBreaker(done, err) }()
+	defer finishPostgresBreaker(done, &err)
 
 	ctx, operation := r.telemetry.startRepositoryOperation(ctx, "SELECT", "avatars")
 	defer func() { finishRepositoryOperation(operation, err) }()
@@ -228,7 +228,7 @@ func (r *AvatarRepository) ListAvatarsByUser(ctx context.Context, userID string,
 	if err != nil {
 		return nil, err
 	}
-	defer func() { finishPostgresBreaker(done, err) }()
+	defer finishPostgresBreaker(done, &err)
 
 	ctx, operation := r.telemetry.startRepositoryOperation(ctx, "SELECT", "avatars")
 	defer func() { finishRepositoryOperation(operation, err) }()
@@ -295,7 +295,7 @@ func (r *AvatarRepository) UpdateAvatarStatus(ctx context.Context, id string, st
 	if err != nil {
 		return err
 	}
-	defer func() { finishPostgresBreaker(done, err) }()
+	defer finishPostgresBreaker(done, &err)
 
 	ctx, operation := r.telemetry.startRepositoryOperation(ctx, "UPDATE", "avatars")
 	defer func() { finishRepositoryOperation(operation, err) }()
@@ -320,7 +320,7 @@ func (r *AvatarRepository) MarkAvatarReady(ctx context.Context, id string, width
 	if err != nil {
 		return err
 	}
-	defer func() { finishPostgresBreaker(done, err) }()
+	defer finishPostgresBreaker(done, &err)
 
 	ctx, operation := r.telemetry.startRepositoryOperation(ctx, "UPDATE", "avatars")
 	defer func() { finishRepositoryOperation(operation, err) }()
@@ -349,7 +349,7 @@ func (r *AvatarRepository) SoftDeleteAvatar(ctx context.Context, id string, user
 	if err != nil {
 		return err
 	}
-	defer func() { finishPostgresBreaker(done, err) }()
+	defer finishPostgresBreaker(done, &err)
 
 	ctx, operation := r.telemetry.startRepositoryOperation(ctx, "UPDATE", "avatars")
 	defer func() { finishRepositoryOperation(operation, err) }()
@@ -376,7 +376,7 @@ func (r *AvatarRepository) MarkAvatarDeleted(ctx context.Context, id string, upd
 	if err != nil {
 		return err
 	}
-	defer func() { finishPostgresBreaker(done, err) }()
+	defer finishPostgresBreaker(done, &err)
 
 	ctx, operation := r.telemetry.startRepositoryOperation(ctx, "UPDATE", "avatars")
 	defer func() { finishRepositoryOperation(operation, err) }()

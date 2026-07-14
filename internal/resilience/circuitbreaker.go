@@ -1,4 +1,4 @@
-// Package resilience содержит защитные runtime-механизмы для внешних зависимостей.
+// Package resilience содержит механизмы защиты обращений к внешним зависимостям
 package resilience
 
 import (
@@ -9,21 +9,23 @@ import (
 )
 
 var (
-	// ErrCircuitOpen сообщает, что circuit breaker временно не пропускает запросы.
+	// ErrCircuitOpen сообщает, что автоматический выключатель временно не пропускает запросы
 	ErrCircuitOpen = errors.New("circuit breaker is open")
+	// errOperationPanicked отмечает завершение защищённой операции с паникой
+	errOperationPanicked = errors.New("circuit breaker operation panicked")
 )
 
-// CircuitBreakerConfig содержит настройки circuit breaker.
+// CircuitBreakerConfig содержит настройки автоматического выключателя
 type CircuitBreakerConfig struct {
-	// Enabled включает circuit breaker.
+	// Enabled включает автоматический выключатель
 	Enabled bool
-	// FailureThreshold задаёт число последовательных ошибок перед открытием.
+	// FailureThreshold задаёт число последовательных ошибок перед открытием
 	FailureThreshold int
-	// OpenTimeout задаёт время до пробного запроса в half-open состоянии.
+	// OpenTimeout задаёт время до пробного запроса в полуоткрытом состоянии
 	OpenTimeout time.Duration
 }
 
-// CircuitBreaker защищает внешнюю зависимость от повторных запросов после серии ошибок.
+// CircuitBreaker защищает внешнюю зависимость от повторных запросов после серии ошибок
 type CircuitBreaker struct {
 	name             string
 	enabled          bool
@@ -36,6 +38,7 @@ type CircuitBreaker struct {
 	failures         int
 	openedAt         time.Time
 	halfOpenInFlight bool
+	generation       uint64
 }
 
 type circuitState string
@@ -46,7 +49,7 @@ const (
 	stateHalfOpen circuitState = "half-open"
 )
 
-// NewCircuitBreaker создаёт circuit breaker для именованной внешней зависимости.
+// NewCircuitBreaker создаёт автоматический выключатель для именованной внешней зависимости
 func NewCircuitBreaker(name string, cfg CircuitBreakerConfig) *CircuitBreaker {
 	threshold := cfg.FailureThreshold
 	if threshold <= 0 {
@@ -67,7 +70,7 @@ func NewCircuitBreaker(name string, cfg CircuitBreakerConfig) *CircuitBreaker {
 	}
 }
 
-// Allow резервирует попытку обращения к зависимости или возвращает ErrCircuitOpen.
+// Allow резервирует попытку обращения к зависимости или возвращает ErrCircuitOpen
 func (b *CircuitBreaker) Allow() (func(error), error) {
 	if b == nil || !b.enabled {
 		return func(error) {}, nil
@@ -92,22 +95,36 @@ func (b *CircuitBreaker) Allow() (func(error), error) {
 		b.halfOpenInFlight = true
 	}
 
-	return b.report, nil
+	attemptGeneration := b.generation
+	var once sync.Once
+	return func(err error) {
+		once.Do(func() {
+			b.report(attemptGeneration, err)
+		})
+	}, nil
 }
 
-// Execute выполняет операцию только если circuit breaker разрешает обращение.
-func (b *CircuitBreaker) Execute(operation func() error) error {
+// Execute выполняет операцию только если circuit breaker разрешает обращение
+func (b *CircuitBreaker) Execute(operation func() error) (err error) {
 	done, err := b.Allow()
 	if err != nil {
 		return err
 	}
+	defer func() {
+		panicValue := recover()
+		if panicValue != nil {
+			done(errOperationPanicked)
+			panic(panicValue)
+		}
+		done(err)
+	}()
+
 	err = operation()
-	done(err)
 	return err
 }
 
-// report обновляет состояние breaker по результату попытки.
-func (b *CircuitBreaker) report(err error) {
+// report обновляет состояние выключателя по результату попытки текущего поколения
+func (b *CircuitBreaker) report(attemptGeneration uint64, err error) {
 	if b == nil || !b.enabled {
 		return
 	}
@@ -115,7 +132,14 @@ func (b *CircuitBreaker) report(err error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
+	if attemptGeneration != b.generation {
+		return
+	}
+
 	if err == nil {
+		if b.state == stateHalfOpen {
+			b.generation++
+		}
 		b.state = stateClosed
 		b.failures = 0
 		b.halfOpenInFlight = false
@@ -133,8 +157,9 @@ func (b *CircuitBreaker) report(err error) {
 	}
 }
 
-// open переводит breaker в open состояние.
+// open переводит выключатель в открытое состояние
 func (b *CircuitBreaker) open() {
+	b.generation++
 	b.state = stateOpen
 	b.openedAt = b.now()
 	b.halfOpenInFlight = false

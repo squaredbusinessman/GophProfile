@@ -270,7 +270,7 @@ func (c *Client) HealthCheck(ctx context.Context) error {
 	}
 }
 
-// callKafka выполняет запрос к Kafka producer через circuit breaker.
+// callKafka выполняет запрос к производителю Kafka через автоматический выключатель
 func (c *Client) callKafka(operation func() error) error {
 	if c.breaker == nil {
 		return operation()

@@ -26,7 +26,7 @@ func (r *OutboxRepository) ReadOutboxOperationalStats(ctx context.Context) (pend
 	if err != nil {
 		return 0, 0, err
 	}
-	defer func() { finishPostgresBreaker(done, err) }()
+	defer finishPostgresBreaker(done, &err)
 
 	ctx, operation := r.telemetry.startRepositoryOperation(ctx, "SELECT", "outbox_events")
 	defer func() { finishRepositoryOperation(operation, err) }()
@@ -58,7 +58,7 @@ func (r *OutboxRepository) CreateAvatarWithOutbox(ctx context.Context, item avat
 	if err != nil {
 		return err
 	}
-	defer func() { finishPostgresBreaker(done, err) }()
+	defer finishPostgresBreaker(done, &err)
 
 	ctx, span := r.telemetry.startRepositoryOperation(ctx, "TRANSACTION", "")
 	defer func() { finishRepositoryOperation(span, err) }()
@@ -98,7 +98,7 @@ func (r *OutboxRepository) SoftDeleteAvatarWithOutbox(ctx context.Context, id st
 	if err != nil {
 		return err
 	}
-	defer func() { finishPostgresBreaker(done, err) }()
+	defer finishPostgresBreaker(done, &err)
 
 	ctx, span := r.telemetry.startRepositoryOperation(ctx, "TRANSACTION", "")
 	defer func() { finishRepositoryOperation(span, err) }()
@@ -150,7 +150,7 @@ func (r *OutboxRepository) MarkOutboxPublished(ctx context.Context, id string, p
 	if err != nil {
 		return err
 	}
-	defer func() { finishPostgresBreaker(done, err) }()
+	defer finishPostgresBreaker(done, &err)
 
 	ctx, span := r.telemetry.startRepositoryOperation(ctx, "UPDATE", "outbox_events")
 	defer func() { finishRepositoryOperation(span, err) }()
@@ -176,7 +176,7 @@ func (r *OutboxRepository) MarkOutboxPublishAttemptFailed(ctx context.Context, i
 	if err != nil {
 		return err
 	}
-	defer func() { finishPostgresBreaker(done, err) }()
+	defer finishPostgresBreaker(done, &err)
 
 	ctx, span := r.telemetry.startRepositoryOperation(ctx, "UPDATE", "outbox_events")
 	defer func() { finishRepositoryOperation(span, err) }()
@@ -202,7 +202,7 @@ func (r *OutboxRepository) ListPendingOutboxEvents(ctx context.Context, limit in
 	if err != nil {
 		return nil, err
 	}
-	defer func() { finishPostgresBreaker(done, err) }()
+	defer finishPostgresBreaker(done, &err)
 
 	ctx, span := r.telemetry.startRepositoryOperation(ctx, "SELECT", "outbox_events")
 	defer func() { finishRepositoryOperation(span, err) }()

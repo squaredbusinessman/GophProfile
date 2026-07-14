@@ -7,10 +7,12 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	confluent "github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/squaredbusinessman/GophProfile/internal/resilience"
 	"go.opentelemetry.io/otel"
 	otelprom "go.opentelemetry.io/otel/exporters/prometheus"
 	"go.opentelemetry.io/otel/propagation"
@@ -19,6 +21,39 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
 )
+
+// TestCallKafkaReportsPanicAndReleasesHalfOpen проверяет восстановление выключателя Kafka после паники
+func TestCallKafkaReportsPanicAndReleasesHalfOpen(t *testing.T) {
+	client := &Client{breaker: resilience.NewCircuitBreaker("kafka", resilience.CircuitBreakerConfig{
+		Enabled:          true,
+		FailureThreshold: 1,
+		OpenTimeout:      5 * time.Millisecond,
+	})}
+
+	testErr := errors.New("kafka unavailable")
+	if err := client.callKafka(func() error { return testErr }); !errors.Is(err, testErr) {
+		t.Fatalf("callKafka() error = %v, want dependency error", err)
+	}
+	time.Sleep(10 * time.Millisecond)
+
+	panicValue := func() (recovered any) {
+		defer func() { recovered = recover() }()
+		_ = client.callKafka(func() error { panic("kafka panic") })
+		return nil
+	}()
+	if panicValue != "kafka panic" {
+		t.Fatalf("panic value = %v, want kafka panic", panicValue)
+	}
+
+	if err := client.callKafka(func() error { return nil }); !errors.Is(err, resilience.ErrCircuitOpen) {
+		t.Fatalf("callKafka() after panic error = %v, want ErrCircuitOpen", err)
+	}
+
+	time.Sleep(10 * time.Millisecond)
+	if err := client.callKafka(func() error { return nil }); err != nil {
+		t.Fatalf("recovery callKafka() error = %v, want nil", err)
+	}
+}
 
 // TestHeaderCarrierInjectExtractRoundTrip проверяет перенос контекста W3C и неизвестных заголовков
 func TestHeaderCarrierInjectExtractRoundTrip(t *testing.T) {

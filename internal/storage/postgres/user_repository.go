@@ -34,7 +34,7 @@ func (r *UserRepository) CreateUser(ctx context.Context, item user.User) (err er
 	if err != nil {
 		return err
 	}
-	defer func() { finishPostgresBreaker(done, err) }()
+	defer finishPostgresBreaker(done, &err)
 
 	ctx, operation := r.telemetry.startRepositoryOperation(ctx, "INSERT", "users")
 	defer func() { finishRepositoryOperation(operation, err) }()
@@ -68,7 +68,7 @@ func (r *UserRepository) GetUser(ctx context.Context, id string) (item user.User
 	if err != nil {
 		return user.User{}, err
 	}
-	defer func() { finishPostgresBreaker(done, err) }()
+	defer finishPostgresBreaker(done, &err)
 
 	ctx, operation := r.telemetry.startRepositoryOperation(ctx, "SELECT", "users")
 	defer func() { finishRepositoryOperation(operation, err) }()
@@ -94,7 +94,7 @@ func (r *UserRepository) GetUserByEmail(ctx context.Context, email string) (item
 	if err != nil {
 		return user.User{}, err
 	}
-	defer func() { finishPostgresBreaker(done, err) }()
+	defer finishPostgresBreaker(done, &err)
 
 	ctx, operation := r.telemetry.startRepositoryOperation(ctx, "SELECT", "users")
 	defer func() { finishRepositoryOperation(operation, err) }()
@@ -120,7 +120,7 @@ func (r *UserRepository) FindOrCreateUserByEmail(ctx context.Context, email stri
 	if err != nil {
 		return user.User{}, err
 	}
-	defer func() { finishPostgresBreaker(done, err) }()
+	defer finishPostgresBreaker(done, &err)
 
 	ctx, operation := r.telemetry.startRepositoryOperation(ctx, "INSERT", "users")
 	defer func() { finishRepositoryOperation(operation, err) }()

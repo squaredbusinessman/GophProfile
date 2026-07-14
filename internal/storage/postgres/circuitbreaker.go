@@ -9,7 +9,9 @@ import (
 	"github.com/squaredbusinessman/GophProfile/internal/resilience"
 )
 
-// newPostgresBreaker создаёт circuit breaker для PostgreSQL repository.
+var errPostgresOperationPanicked = errors.New("postgres operation panicked")
+
+// newPostgresBreaker создаёт автоматический выключатель для хранилища PostgreSQL
 func newPostgresBreaker(cfg []resilience.CircuitBreakerConfig) *resilience.CircuitBreaker {
 	breakerCfg := resilience.CircuitBreakerConfig{}
 	if len(cfg) > 0 {
@@ -18,11 +20,23 @@ func newPostgresBreaker(cfg []resilience.CircuitBreakerConfig) *resilience.Circu
 	return resilience.NewCircuitBreaker("postgres", breakerCfg)
 }
 
-// finishPostgresBreaker записывает только ошибки зависимости, не бизнес-результаты.
-func finishPostgresBreaker(done func(error), err error) {
+// finishPostgresBreaker завершает попытку и сохраняет исходное значение паники
+func finishPostgresBreaker(done func(error), operationErr *error) {
+	panicValue := recover()
+	if panicValue != nil {
+		if done != nil {
+			done(errPostgresOperationPanicked)
+		}
+		panic(panicValue)
+	}
 	if done == nil {
 		return
 	}
+	if operationErr == nil {
+		done(nil)
+		return
+	}
+	err := *operationErr
 	if isPostgresBusinessError(err) {
 		done(nil)
 		return
@@ -30,7 +44,7 @@ func finishPostgresBreaker(done func(error), err error) {
 	done(err)
 }
 
-// isPostgresBusinessError отличает ожидаемые бизнес-ошибки от отказа PostgreSQL.
+// isPostgresBusinessError отличает ожидаемые бизнес-ошибки от отказа PostgreSQL
 func isPostgresBusinessError(err error) bool {
 	return errors.Is(err, avatar.ErrNotFound) ||
 		errors.Is(err, avatar.ErrInvalidStatus) ||
