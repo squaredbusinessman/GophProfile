@@ -26,10 +26,7 @@ func main() {
 
 	cfg, err := app.LoadConfigForProcess(ctx, "server")
 	if err != nil {
-		if _, writeErr := fmt.Fprintf(os.Stderr, "load config: %v\n", err); writeErr != nil {
-			stop()
-			os.Exit(1)
-		}
+		_, _ = fmt.Fprintf(os.Stderr, "load config: %v\n", err)
 		stop()
 		os.Exit(1)
 	}
