@@ -10,24 +10,16 @@ import (
 
 	"github.com/squaredbusinessman/GophProfile/internal/domain/avatar"
 	"github.com/squaredbusinessman/GophProfile/internal/domain/outbox"
-	"github.com/squaredbusinessman/GophProfile/internal/resilience"
 )
 
-// OutboxRepository сохраняет аватары и события outbox в PostgreSQL
-type OutboxRepository struct {
+// outboxRepository сохраняет аватары и события outbox в PostgreSQL
+type outboxRepository struct {
 	db        *sql.DB
 	telemetry postgresTelemetry
-	breaker   *resilience.CircuitBreaker
 }
 
 // ReadOutboxOperationalStats возвращает размер очереди и возраст старейшего события outbox
-func (r *OutboxRepository) ReadOutboxOperationalStats(ctx context.Context) (pendingCount int64, oldestAgeSeconds float64, err error) {
-	done, err := r.breaker.Allow()
-	if err != nil {
-		return 0, 0, err
-	}
-	defer finishPostgresBreaker(done, &err)
-
+func (r *outboxRepository) ReadOutboxOperationalStats(ctx context.Context) (pendingCount int64, oldestAgeSeconds float64, err error) {
 	ctx, operation := r.telemetry.startRepositoryOperation(ctx, "SELECT", "outbox_events")
 	defer func() { finishRepositoryOperation(operation, err) }()
 	err = r.db.QueryRowContext(ctx, `
@@ -43,23 +35,8 @@ func (r *OutboxRepository) ReadOutboxOperationalStats(ctx context.Context) (pend
 	return pendingCount, oldestAgeSeconds, nil
 }
 
-// NewOutboxRepository создаёт репозиторий событий outbox
-func NewOutboxRepository(db *sql.DB, breakerCfg ...resilience.CircuitBreakerConfig) (*OutboxRepository, error) {
-	telemetry, err := newPostgresTelemetry()
-	if err != nil {
-		return nil, fmt.Errorf("create outbox repository telemetry: %w", err)
-	}
-	return &OutboxRepository{db: db, telemetry: telemetry, breaker: newPostgresBreaker(breakerCfg)}, nil
-}
-
 // CreateAvatarWithOutbox атомарно сохраняет аватар и событие outbox
-func (r *OutboxRepository) CreateAvatarWithOutbox(ctx context.Context, item avatar.Avatar, event outbox.Event) (err error) {
-	done, err := r.breaker.Allow()
-	if err != nil {
-		return err
-	}
-	defer finishPostgresBreaker(done, &err)
-
+func (r *outboxRepository) CreateAvatarWithOutbox(ctx context.Context, item avatar.Avatar, event outbox.Event) (err error) {
 	ctx, span := r.telemetry.startRepositoryOperation(ctx, "TRANSACTION", "")
 	defer func() { finishRepositoryOperation(span, err) }()
 
@@ -93,13 +70,7 @@ func (r *OutboxRepository) CreateAvatarWithOutbox(ctx context.Context, item avat
 }
 
 // SoftDeleteAvatarWithOutbox атомарно помечает аватар удаляемым и сохраняет событие outbox
-func (r *OutboxRepository) SoftDeleteAvatarWithOutbox(ctx context.Context, id string, userID string, deletedAt time.Time, event outbox.Event) (err error) {
-	done, err := r.breaker.Allow()
-	if err != nil {
-		return err
-	}
-	defer finishPostgresBreaker(done, &err)
-
+func (r *outboxRepository) SoftDeleteAvatarWithOutbox(ctx context.Context, id string, userID string, deletedAt time.Time, event outbox.Event) (err error) {
 	ctx, span := r.telemetry.startRepositoryOperation(ctx, "TRANSACTION", "")
 	defer func() { finishRepositoryOperation(span, err) }()
 
@@ -145,13 +116,7 @@ func (r *OutboxRepository) SoftDeleteAvatarWithOutbox(ctx context.Context, id st
 }
 
 // MarkOutboxPublished отмечает событие outbox опубликованным
-func (r *OutboxRepository) MarkOutboxPublished(ctx context.Context, id string, publishedAt time.Time) (err error) {
-	done, err := r.breaker.Allow()
-	if err != nil {
-		return err
-	}
-	defer finishPostgresBreaker(done, &err)
-
+func (r *outboxRepository) MarkOutboxPublished(ctx context.Context, id string, publishedAt time.Time) (err error) {
 	ctx, span := r.telemetry.startRepositoryOperation(ctx, "UPDATE", "outbox_events")
 	defer func() { finishRepositoryOperation(span, err) }()
 
@@ -171,13 +136,7 @@ func (r *OutboxRepository) MarkOutboxPublished(ctx context.Context, id string, p
 }
 
 // MarkOutboxPublishAttemptFailed сохраняет ошибку публикации и оставляет событие ожидающим
-func (r *OutboxRepository) MarkOutboxPublishAttemptFailed(ctx context.Context, id string, publishErr error, updatedAt time.Time) (err error) {
-	done, err := r.breaker.Allow()
-	if err != nil {
-		return err
-	}
-	defer finishPostgresBreaker(done, &err)
-
+func (r *outboxRepository) MarkOutboxPublishAttemptFailed(ctx context.Context, id string, publishErr error, updatedAt time.Time) (err error) {
 	ctx, span := r.telemetry.startRepositoryOperation(ctx, "UPDATE", "outbox_events")
 	defer func() { finishRepositoryOperation(span, err) }()
 
@@ -197,13 +156,7 @@ func (r *OutboxRepository) MarkOutboxPublishAttemptFailed(ctx context.Context, i
 }
 
 // ListPendingOutboxEvents возвращает ожидающие события outbox для повторной публикации
-func (r *OutboxRepository) ListPendingOutboxEvents(ctx context.Context, limit int) (events []outbox.Event, err error) {
-	done, err := r.breaker.Allow()
-	if err != nil {
-		return nil, err
-	}
-	defer finishPostgresBreaker(done, &err)
-
+func (r *outboxRepository) ListPendingOutboxEvents(ctx context.Context, limit int) (events []outbox.Event, err error) {
 	ctx, span := r.telemetry.startRepositoryOperation(ctx, "SELECT", "outbox_events")
 	defer func() { finishRepositoryOperation(span, err) }()
 

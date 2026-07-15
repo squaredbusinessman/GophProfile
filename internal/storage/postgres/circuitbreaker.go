@@ -20,6 +20,25 @@ func newPostgresBreaker(cfg []resilience.CircuitBreakerConfig) *resilience.Circu
 	return resilience.NewCircuitBreaker("postgres", breakerCfg)
 }
 
+// executePostgres выполняет операцию репозитория через автоматический выключатель
+func executePostgres[T any](breaker *resilience.CircuitBreaker, operation func() (T, error)) (result T, err error) {
+	done, err := breaker.Allow()
+	if err != nil {
+		return result, err
+	}
+	defer finishPostgresBreaker(done, &err)
+
+	return operation()
+}
+
+// executePostgresCommand выполняет команду репозитория через автоматический выключатель
+func executePostgresCommand(breaker *resilience.CircuitBreaker, operation func() error) error {
+	_, err := executePostgres(breaker, func() (struct{}, error) {
+		return struct{}{}, operation()
+	})
+	return err
+}
+
 // finishPostgresBreaker завершает попытку и сохраняет исходное значение паники
 func finishPostgresBreaker(done func(error), operationErr *error) {
 	panicValue := recover()

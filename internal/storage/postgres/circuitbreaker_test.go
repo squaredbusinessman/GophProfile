@@ -9,24 +9,28 @@ import (
 	"github.com/squaredbusinessman/GophProfile/internal/resilience"
 )
 
-// TestFinishPostgresBreakerReportsPanic проверяет что паника не закрывает пробную попытку
-func TestFinishPostgresBreakerReportsPanic(t *testing.T) {
+// TestExecutePostgresReportsPanic проверяет что паника не закрывает пробную попытку
+func TestExecutePostgresReportsPanic(t *testing.T) {
 	breaker := resilience.NewCircuitBreaker("postgres", resilience.CircuitBreakerConfig{
 		Enabled:          true,
 		FailureThreshold: 1,
 		OpenTimeout:      5 * time.Millisecond,
 	})
 
-	if err := breaker.Execute(func() error { return errors.New("database unavailable") }); err == nil {
-		t.Fatal("Execute() error = nil, want database error")
+	if err := executePostgresCommand(breaker, func() error { return errors.New("database unavailable") }); err == nil {
+		t.Fatal("executePostgresCommand() error = nil, want database error")
 	}
 	time.Sleep(10 * time.Millisecond)
 
-	done, err := breaker.Allow()
-	if err != nil {
-		t.Fatalf("Allow() error = %v", err)
-	}
-	panicValue := callPanickingPostgresOperation(done)
+	panicValue := func() (recovered any) {
+		defer func() {
+			recovered = recover()
+		}()
+		_ = executePostgresCommand(breaker, func() error {
+			panic("database panic")
+		})
+		return nil
+	}()
 	if panicValue != "database panic" {
 		t.Fatalf("panic value = %v, want database panic", panicValue)
 	}
@@ -41,34 +45,19 @@ func TestFinishPostgresBreakerReportsPanic(t *testing.T) {
 	}
 }
 
-// TestFinishPostgresBreakerIgnoresBusinessError проверяет что ожидаемый результат не считается отказом базы
-func TestFinishPostgresBreakerIgnoresBusinessError(t *testing.T) {
+// TestExecutePostgresIgnoresBusinessError проверяет что ожидаемый результат не считается отказом базы
+func TestExecutePostgresIgnoresBusinessError(t *testing.T) {
 	breaker := resilience.NewCircuitBreaker("postgres", resilience.CircuitBreakerConfig{
 		Enabled:          true,
 		FailureThreshold: 1,
 		OpenTimeout:      time.Minute,
 	})
-	done, err := breaker.Allow()
-	if err != nil {
-		t.Fatalf("Allow() error = %v", err)
+	err := executePostgresCommand(breaker, func() error { return avatar.ErrNotFound })
+	if !errors.Is(err, avatar.ErrNotFound) {
+		t.Fatalf("executePostgresCommand() error = %v, want avatar.ErrNotFound", err)
 	}
-	operationErr := error(avatar.ErrNotFound)
-	finishPostgresBreaker(done, &operationErr)
 
 	if err := breaker.Execute(func() error { return nil }); err != nil {
 		t.Fatalf("Execute() error = %v, want nil", err)
 	}
-}
-
-// callPanickingPostgresOperation запускает панику через штатный отложенный обработчик
-func callPanickingPostgresOperation(done func(error)) (recovered any) {
-	defer func() {
-		recovered = recover()
-	}()
-	func() {
-		var operationErr error
-		defer finishPostgresBreaker(done, &operationErr)
-		panic("database panic")
-	}()
-	return nil
 }
