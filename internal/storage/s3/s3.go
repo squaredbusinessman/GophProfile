@@ -184,11 +184,8 @@ func (c *Client) Exists(ctx context.Context, key string) (bool, error) {
 	}
 
 	ctx, operation := c.telemetry.startS3Operation(ctx, "Exists", "HeadObject")
-	var metadata ObjectMetadata
-	err := c.callS3(func() error {
-		var statErr error
-		metadata, statErr = c.api.StatObject(ctx, c.bucket, key)
-		return statErr
+	metadata, err := callS3Value(c, func() (ObjectMetadata, error) {
+		return c.api.StatObject(ctx, c.bucket, key)
 	})
 	if err != nil {
 		if isNotFound(err) {
@@ -205,11 +202,8 @@ func (c *Client) Exists(ctx context.Context, key string) (bool, error) {
 
 // HealthCheck проверяет доступность bucket в S3-compatible хранилище
 func (c *Client) HealthCheck(ctx context.Context) error {
-	var exists bool
-	err := c.callS3(func() error {
-		var checkErr error
-		exists, checkErr = c.api.BucketExists(ctx, c.bucket)
-		return checkErr
+	exists, err := callS3Value(c, func() (bool, error) {
+		return c.api.BucketExists(ctx, c.bucket)
 	})
 	if err != nil {
 		return wrapError("check bucket", err)
@@ -231,11 +225,8 @@ func (c *Client) EnsureBucket(ctx context.Context) (resultErr error) {
 		}
 	}()
 
-	var exists bool
-	err := c.callS3(func() error {
-		var checkErr error
-		exists, checkErr = c.api.BucketExists(ctx, c.bucket)
-		return checkErr
+	exists, err := callS3Value(c, func() (bool, error) {
+		return c.api.BucketExists(ctx, c.bucket)
 	})
 	if err != nil {
 		return wrapError("check bucket", err)
@@ -247,11 +238,8 @@ func (c *Client) EnsureBucket(ctx context.Context) (resultErr error) {
 	if err := c.callS3(func() error {
 		return c.api.MakeBucket(ctx, c.bucket, c.region)
 	}); err != nil {
-		exists, checkErr := false, error(nil)
-		checkErr = c.callS3(func() error {
-			var existsErr error
-			exists, existsErr = c.api.BucketExists(ctx, c.bucket)
-			return existsErr
+		exists, checkErr := callS3Value(c, func() (bool, error) {
+			return c.api.BucketExists(ctx, c.bucket)
 		})
 		if checkErr == nil && exists {
 			return nil
@@ -264,11 +252,8 @@ func (c *Client) EnsureBucket(ctx context.Context) (resultErr error) {
 // statObject получает metadata и измеряет HeadObject отдельно от GetObject
 func (c *Client) statObject(ctx context.Context, key string) (ObjectMetadata, error) {
 	ctx, operation := c.telemetry.startS3Operation(ctx, "Stat", "HeadObject")
-	var metadata ObjectMetadata
-	err := c.callS3(func() error {
-		var statErr error
-		metadata, statErr = c.api.StatObject(ctx, c.bucket, key)
-		return statErr
+	metadata, err := callS3Value(c, func() (ObjectMetadata, error) {
+		return c.api.StatObject(ctx, c.bucket, key)
 	})
 	if err != nil {
 		if isNotFound(err) {
@@ -285,11 +270,8 @@ func (c *Client) statObject(ctx context.Context, key string) (ObjectMetadata, er
 // getObject открывает поток объекта без дополнительного чтения body
 func (c *Client) getObject(ctx context.Context, key string, metadata ObjectMetadata) (io.ReadCloser, error) {
 	ctx, operation := c.telemetry.startS3Operation(ctx, "Get", "GetObject", objectAttributes(metadata.Size, metadata.ContentType)...)
-	var object io.ReadCloser
-	err := c.callS3(func() error {
-		var getErr error
-		object, getErr = c.api.GetObject(ctx, c.bucket, key)
-		return getErr
+	object, err := callS3Value(c, func() (io.ReadCloser, error) {
+		return c.api.GetObject(ctx, c.bucket, key)
 	})
 	if err != nil {
 		if isNotFound(err) {
@@ -308,10 +290,18 @@ func (c *Client) Bucket() string {
 }
 
 // callS3 выполняет S3-запрос через автоматический выключатель и не считает 404 отказом зависимости
-func (c *Client) callS3(operation func() error) (err error) {
-	done, err := c.breaker.Allow()
+func (c *Client) callS3(operation func() error) error {
+	_, err := callS3Value(c, func() (struct{}, error) {
+		return struct{}{}, operation()
+	})
+	return err
+}
+
+// callS3Value выполняет возвращающую значение S3-операцию через автоматический выключатель
+func callS3Value[T any](client *Client, operation func() (T, error)) (result T, err error) {
+	done, err := client.breaker.Allow()
 	if err != nil {
-		return err
+		return result, err
 	}
 	defer func() {
 		panicValue := recover()
@@ -326,8 +316,7 @@ func (c *Client) callS3(operation func() error) (err error) {
 		done(err)
 	}()
 
-	err = operation()
-	return err
+	return operation()
 }
 
 // PutObject сохраняет объект через MinIO SDK
