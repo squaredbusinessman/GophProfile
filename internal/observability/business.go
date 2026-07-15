@@ -32,11 +32,13 @@ func businessMetricViews() []sdkmetric.View {
 
 // OutboxOperationalStatsReader описывает чтение агрегированного состояния outbox
 type OutboxOperationalStatsReader interface {
+	// ReadOutboxOperationalStats возвращает размер backlog и возраст старейшего pending-события.
 	ReadOutboxOperationalStats(ctx context.Context) (pendingCount int64, oldestAgeSeconds float64, err error)
 }
 
 // AvatarOperationalStatsReader описывает чтение агрегированного состояния аватаров
 type AvatarOperationalStatsReader interface {
+	// ReadAvatarOperationalStats возвращает количество аватаров по статусам и общий размер оригиналов.
 	ReadAvatarOperationalStats(ctx context.Context) (countByStatus map[avatar.Status]int64, originalStorageBytes int64, err error)
 }
 

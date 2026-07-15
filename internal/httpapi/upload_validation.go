@@ -92,13 +92,14 @@ func ValidateAvatarUploadRequest(w http.ResponseWriter, req *http.Request) (*Val
 	if err != nil {
 		return nil, validationError("Invalid file", "Cannot open uploaded file")
 	}
-	defer func() {
-		_ = file.Close()
-	}()
 
 	magicContentType, err := detectImageContentType(file)
+	closeErr := file.Close()
 	if err != nil {
 		return nil, err
+	}
+	if closeErr != nil {
+		return nil, validationError("Invalid file", "Cannot close uploaded file")
 	}
 	if magicContentType != contentType {
 		return nil, validationError("Invalid file format", "MIME type does not match file content")

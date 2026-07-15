@@ -2,6 +2,7 @@ package vault
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -54,7 +55,7 @@ func TestReadKV2ReturnsNotFound(t *testing.T) {
 	})
 
 	_, err := client.ReadKV2(context.Background(), "missing")
-	if err != ErrSecretNotFound {
+	if !errors.Is(err, ErrSecretNotFound) {
 		t.Fatalf("error = %v, want ErrSecretNotFound", err)
 	}
 }

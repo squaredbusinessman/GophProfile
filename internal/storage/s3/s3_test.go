@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/minio/minio-go/v7"
+	"github.com/squaredbusinessman/GophProfile/internal/resilience"
 )
 
 // TestObjectKeyBuilders проверяет формат S3 object keys
@@ -31,6 +32,60 @@ func TestObjectKeyBuilders(t *testing.T) {
 	}
 	if tests["300x300"] != "avatars/6f3f3c2d-df58-4e64-91ea-cdf90f4c9c1e/avatar-1/300x300" {
 		t.Fatalf("300x300 key = %q", tests["300x300"])
+	}
+}
+
+// TestCallS3ReportsPanicAndReleasesHalfOpen проверяет восстановление выключателя S3 после паники
+func TestCallS3ReportsPanicAndReleasesHalfOpen(t *testing.T) {
+	client := &Client{
+		breaker: resilience.NewCircuitBreaker("s3", resilience.CircuitBreakerConfig{
+			Enabled:          true,
+			FailureThreshold: 1,
+			OpenTimeout:      5 * time.Millisecond,
+		}),
+	}
+
+	testErr := errors.New("dependency down")
+	if err := client.callS3(func() error { return testErr }); !errors.Is(err, testErr) {
+		t.Fatalf("callS3() error = %v, want dependency error", err)
+	}
+
+	time.Sleep(10 * time.Millisecond)
+	panicValue := func() (recovered any) {
+		defer func() { recovered = recover() }()
+		_ = client.callS3(func() error { panic("s3 panic") })
+		return nil
+	}()
+	if panicValue != "s3 panic" {
+		t.Fatalf("panic value = %v, want s3 panic", panicValue)
+	}
+
+	if err := client.callS3(func() error { return nil }); !errors.Is(err, resilience.ErrCircuitOpen) {
+		t.Fatalf("callS3() after panic error = %v, want ErrCircuitOpen", err)
+	}
+
+	time.Sleep(10 * time.Millisecond)
+	if err := client.callS3(func() error { return nil }); err != nil {
+		t.Fatalf("recovery callS3() error = %v, want nil", err)
+	}
+}
+
+// TestCallS3DoesNotCountNotFoundAsFailure проверяет классификацию отсутствующего объекта
+func TestCallS3DoesNotCountNotFoundAsFailure(t *testing.T) {
+	client := &Client{
+		breaker: resilience.NewCircuitBreaker("s3", resilience.CircuitBreakerConfig{
+			Enabled:          true,
+			FailureThreshold: 1,
+			OpenTimeout:      time.Minute,
+		}),
+	}
+	notFound := minio.ErrorResponse{Code: "NoSuchKey", StatusCode: http.StatusNotFound}
+
+	if err := client.callS3(func() error { return notFound }); !isNotFound(err) {
+		t.Fatalf("callS3() error = %v, want not found", err)
+	}
+	if err := client.callS3(func() error { return nil }); err != nil {
+		t.Fatalf("callS3() after not found error = %v, want nil", err)
 	}
 }
 

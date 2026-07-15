@@ -10,8 +10,11 @@ import (
 
 // OutboxEventStore описывает чтение и обновление событий outbox
 type OutboxEventStore interface {
+	// ListPendingOutboxEvents возвращает ожидающие публикации события outbox.
 	ListPendingOutboxEvents(ctx context.Context, limit int) ([]outbox.Event, error)
+	// MarkOutboxPublished отмечает событие outbox успешно опубликованным.
 	MarkOutboxPublished(ctx context.Context, id string, publishedAt time.Time) error
+	// MarkOutboxPublishAttemptFailed сохраняет ошибку публикации события outbox.
 	MarkOutboxPublishAttemptFailed(ctx context.Context, id string, publishErr error, updatedAt time.Time) error
 }
 

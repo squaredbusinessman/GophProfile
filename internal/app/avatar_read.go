@@ -25,17 +25,21 @@ var (
 
 // AvatarReadRepository описывает чтение метаданных аватаров
 type AvatarReadRepository interface {
+	// GetAvatar возвращает активный аватар по идентификатору.
 	GetAvatar(ctx context.Context, id string) (avatar.Avatar, error)
+	// ListAvatarsByUser возвращает страницу активных аватаров пользователя.
 	ListAvatarsByUser(ctx context.Context, userID string, limit int, offset int) ([]avatar.Avatar, error)
 }
 
 // UserEmailLookup описывает поиск пользователя по адресу электронной почты
 type UserEmailLookup interface {
+	// GetUserByEmail возвращает активного пользователя по нормализованному email.
 	GetUserByEmail(ctx context.Context, email string) (user.User, error)
 }
 
 // AvatarObjectReader описывает чтение объекта аватара
 type AvatarObjectReader interface {
+	// Get открывает объект аватара и возвращает поток вместе с HTTP-метаданными.
 	Get(ctx context.Context, key string) (io.ReadCloser, storages3.ObjectMetadata, error)
 }
 

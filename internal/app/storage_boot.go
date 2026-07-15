@@ -12,7 +12,9 @@ const localS3BucketEnsureTimeout = 30 * time.Second
 
 // S3BucketEnsurer описывает подготовку бакета S3 при запуске приложения
 type S3BucketEnsurer interface {
+	// EnsureBucket создаёт bucket, если он ещё не существует.
 	EnsureBucket(ctx context.Context) error
+	// Bucket возвращает имя bucket для диагностики ошибок запуска.
 	Bucket() string
 }
 

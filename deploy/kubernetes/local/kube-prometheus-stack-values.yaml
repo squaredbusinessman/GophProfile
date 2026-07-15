@@ -1,0 +1,166 @@
+# Локальная конфигурация объединяет метрики, панели и оповещения трёх спринтов
+fullnameOverride: gophprofile-monitoring
+
+defaultRules:
+  create: false
+
+alertmanager:
+  enabled: true
+  config:
+    global:
+      resolve_timeout: 5m
+    route:
+      receiver: local
+      group_by:
+        - alertname
+        - service
+      group_wait: 10s
+      group_interval: 1m
+      repeat_interval: 4h
+    receivers:
+      - name: local
+      - name: "null"
+  alertmanagerSpec:
+    resources:
+      requests:
+        cpu: 25m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 192Mi
+
+grafana:
+  enabled: true
+  adminUser: admin
+  adminPassword: admin
+  env:
+    GF_PLUGINS_PREINSTALL: ""
+  defaultDashboardsEnabled: false
+  testFramework:
+    enabled: false
+  sidecar:
+    dashboards:
+      enabled: true
+      label: gophprofile_dashboard
+      labelValue: "1"
+      searchNamespace: monitoring
+    datasources:
+      enabled: true
+      label: gophprofile_datasource
+      labelValue: "1"
+      defaultDatasourceEnabled: true
+      isDefaultDatasource: true
+      name: Prometheus
+      uid: prometheus
+      exemplarTraceIdDestinations:
+        datasourceUid: jaeger
+        traceIdLabelName: trace_id
+  additionalDataSources:
+    - name: Loki
+      uid: loki
+      type: loki
+      access: proxy
+      url: http://gophprofile-loki.monitoring.svc.cluster.local:3100
+      editable: false
+      jsonData:
+        derivedFields:
+          - name: TraceID
+            matcherRegex: '"trace_id":"([a-f0-9]+)"'
+            datasourceUid: jaeger
+            url: '${__value.raw}'
+    - name: Jaeger
+      uid: jaeger
+      type: jaeger
+      access: proxy
+      url: http://gophprofile-jaeger.gophprofile.svc.cluster.local:16686
+      editable: false
+      jsonData:
+        tracesToLogsV2:
+          datasourceUid: loki
+          spanStartTimeShift: -1m
+          spanEndTimeShift: 1m
+          filterByTraceID: true
+          filterBySpanID: false
+          tags:
+            - key: service.name
+              value: service
+  persistence:
+    enabled: true
+    size: 1Gi
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 300m
+      memory: 384Mi
+
+kubeStateMetrics:
+  enabled: false
+
+nodeExporter:
+  enabled: false
+
+kubeApiServer:
+  enabled: false
+
+kubeControllerManager:
+  enabled: false
+
+coreDns:
+  enabled: false
+
+kubeEtcd:
+  enabled: false
+
+kubeScheduler:
+  enabled: false
+
+kubeProxy:
+  enabled: false
+
+kubelet:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    kubelet: true
+    cAdvisor: true
+    cAdvisorInterval: 10s
+
+prometheusOperator:
+  tls:
+    enabled: false
+  admissionWebhooks:
+    enabled: false
+  resources:
+    requests:
+      cpu: 50m
+      memory: 96Mi
+    limits:
+      cpu: 300m
+      memory: 256Mi
+
+prometheus:
+  prometheusSpec:
+    retention: 6h
+    retentionSize: 800MB
+    additionalScrapeConfigs:
+      - job_name: kafka-exporter
+        static_configs:
+          - targets:
+              - gophprofile-kafka-exporter.monitoring.svc.cluster.local:9308
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 1Gi
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 768Mi

@@ -1,0 +1,259 @@
+# Значения Helm chart GophProfile по умолчанию
+# Этот файл задаёт публичный контракт развёртывания
+# Файлы окружений должны переопределять значения без изменения шаблонов
+
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  repository: gophprofile
+  tag: local
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+config:
+  appEnv: local
+  logLevel: info
+  logFormat: json
+  otel:
+    enabled: false
+    exporterOtlpEndpoint: ""
+    exporterOtlpInsecure: true
+    tracesSampler: parentbased_always_on
+    tracesSamplerArg: "1"
+  http:
+    addr: ":8080"
+    defaultAvatarPath: /app/default_avatar.png
+    corsAllowedOrigins: "http://localhost,http://localhost:3000,http://localhost:5173"
+    rateLimitRps: "20"
+    rateLimitBurst: "40"
+  kafka:
+    brokers: ""
+    consumerGroup: gophprofile-avatar-worker
+  s3:
+    endpoint: ""
+    bucket: gophprofile-avatars
+    usePathStyle: true
+    region: us-east-1
+  vault:
+    enabled: false
+    addr: ""
+    kvMount: secret
+    servicePath: gophprofile
+    timeout: 5s
+  circuitBreaker:
+    enabled: true
+    failureThreshold: "5"
+    openTimeout: 30s
+
+secret:
+  create: true
+  existingSecret: ""
+  values:
+    databaseUrl: ""
+    s3AccessKey: ""
+    s3SecretKey: ""
+    vaultToken: ""
+
+server:
+  enabled: true
+  replicaCount: 2
+  command:
+    - /app/server
+  ports:
+    http: 8080
+    metrics: 9090
+  env:
+    otelServiceName: gophprofile-server
+    metricsAddr: ":9090"
+    kafkaClientId: gophprofile-server
+  service:
+    type: ClusterIP
+    port: 80
+    metricsPort: 9090
+  probes:
+    readiness:
+      path: /health
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      timeoutSeconds: 3
+      failureThreshold: 3
+    liveness:
+      path: /health
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      timeoutSeconds: 3
+      failureThreshold: 3
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+
+worker:
+  enabled: true
+  replicaCount: 1
+  command:
+    - /app/worker
+  ports:
+    metrics: 9091
+  env:
+    otelServiceName: gophprofile-worker
+    metricsAddr: ":9091"
+    kafkaClientId: gophprofile-worker
+  service:
+    type: ClusterIP
+    metricsPort: 9091
+  probes:
+    readiness:
+      path: /metrics
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      timeoutSeconds: 3
+      failureThreshold: 3
+    liveness:
+      path: /metrics
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      timeoutSeconds: 3
+      failureThreshold: 3
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+
+ingress:
+  enabled: false
+  className: ""
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+  hosts:
+    - host: gophprofile.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  scrapeTimeout: 10s
+  path: /metrics
+  jobLabel: gophprofile.io/metrics-job
+  labels: {}
+  namespaceSelector: {}
+
+prometheusRule:
+  enabled: false
+  labels: {}
+
+networkPolicy:
+  enabled: false
+  ingress:
+    ingressController:
+      namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: ingress-nginx
+      podSelector: {}
+    monitoring:
+      namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
+      podSelector: {}
+    serverAdditional: []
+  egress:
+    # DNS нужен приложению для поиска сервисов PostgreSQL, Kafka, S3 и OTLP
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # NetworkPolicy не умеет выбирать сервис по DNS-имени
+    # В production эти правила нужно сузить через namespaceSelector, podSelector или ipBlock
+    - ports:
+        - protocol: TCP
+          port: 5432
+    - ports:
+        - protocol: TCP
+          port: 9092
+    - ports:
+        - protocol: TCP
+          port: 9000
+        - protocol: TCP
+          port: 443
+    - ports:
+        - protocol: TCP
+          port: 4317
+        - protocol: TCP
+          port: 4318
+
+migrations:
+  enabled: true
+  image:
+    repository: postgres
+    tag: 16-alpine
+    pullPolicy: IfNotPresent
+  backoffLimit: 3
+  activeDeadlineSeconds: 300
+  ttlSecondsAfterFinished: 300
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+  hook:
+    enabled: true
+    configMapWeight: "-10"
+    jobWeight: "-5"
+    configMapDeletePolicy: hook-failed
+    deletePolicy: hook-failed

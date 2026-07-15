@@ -12,14 +12,14 @@ import (
 	"github.com/squaredbusinessman/GophProfile/internal/domain/outbox"
 )
 
-// OutboxRepository сохраняет аватары и события outbox в PostgreSQL
-type OutboxRepository struct {
+// outboxRepository сохраняет аватары и события outbox в PostgreSQL
+type outboxRepository struct {
 	db        *sql.DB
 	telemetry postgresTelemetry
 }
 
 // ReadOutboxOperationalStats возвращает размер очереди и возраст старейшего события outbox
-func (r *OutboxRepository) ReadOutboxOperationalStats(ctx context.Context) (pendingCount int64, oldestAgeSeconds float64, err error) {
+func (r *outboxRepository) ReadOutboxOperationalStats(ctx context.Context) (pendingCount int64, oldestAgeSeconds float64, err error) {
 	ctx, operation := r.telemetry.startRepositoryOperation(ctx, "SELECT", "outbox_events")
 	defer func() { finishRepositoryOperation(operation, err) }()
 	err = r.db.QueryRowContext(ctx, `
@@ -35,17 +35,8 @@ func (r *OutboxRepository) ReadOutboxOperationalStats(ctx context.Context) (pend
 	return pendingCount, oldestAgeSeconds, nil
 }
 
-// NewOutboxRepository создаёт репозиторий событий outbox
-func NewOutboxRepository(db *sql.DB) (*OutboxRepository, error) {
-	telemetry, err := newPostgresTelemetry()
-	if err != nil {
-		return nil, fmt.Errorf("create outbox repository telemetry: %w", err)
-	}
-	return &OutboxRepository{db: db, telemetry: telemetry}, nil
-}
-
 // CreateAvatarWithOutbox атомарно сохраняет аватар и событие outbox
-func (r *OutboxRepository) CreateAvatarWithOutbox(ctx context.Context, item avatar.Avatar, event outbox.Event) (err error) {
+func (r *outboxRepository) CreateAvatarWithOutbox(ctx context.Context, item avatar.Avatar, event outbox.Event) (err error) {
 	ctx, span := r.telemetry.startRepositoryOperation(ctx, "TRANSACTION", "")
 	defer func() { finishRepositoryOperation(span, err) }()
 
@@ -79,7 +70,7 @@ func (r *OutboxRepository) CreateAvatarWithOutbox(ctx context.Context, item avat
 }
 
 // SoftDeleteAvatarWithOutbox атомарно помечает аватар удаляемым и сохраняет событие outbox
-func (r *OutboxRepository) SoftDeleteAvatarWithOutbox(ctx context.Context, id string, userID string, deletedAt time.Time, event outbox.Event) (err error) {
+func (r *outboxRepository) SoftDeleteAvatarWithOutbox(ctx context.Context, id string, userID string, deletedAt time.Time, event outbox.Event) (err error) {
 	ctx, span := r.telemetry.startRepositoryOperation(ctx, "TRANSACTION", "")
 	defer func() { finishRepositoryOperation(span, err) }()
 
@@ -125,7 +116,7 @@ func (r *OutboxRepository) SoftDeleteAvatarWithOutbox(ctx context.Context, id st
 }
 
 // MarkOutboxPublished отмечает событие outbox опубликованным
-func (r *OutboxRepository) MarkOutboxPublished(ctx context.Context, id string, publishedAt time.Time) (err error) {
+func (r *outboxRepository) MarkOutboxPublished(ctx context.Context, id string, publishedAt time.Time) (err error) {
 	ctx, span := r.telemetry.startRepositoryOperation(ctx, "UPDATE", "outbox_events")
 	defer func() { finishRepositoryOperation(span, err) }()
 
@@ -145,7 +136,7 @@ func (r *OutboxRepository) MarkOutboxPublished(ctx context.Context, id string, p
 }
 
 // MarkOutboxPublishAttemptFailed сохраняет ошибку публикации и оставляет событие ожидающим
-func (r *OutboxRepository) MarkOutboxPublishAttemptFailed(ctx context.Context, id string, publishErr error, updatedAt time.Time) (err error) {
+func (r *outboxRepository) MarkOutboxPublishAttemptFailed(ctx context.Context, id string, publishErr error, updatedAt time.Time) (err error) {
 	ctx, span := r.telemetry.startRepositoryOperation(ctx, "UPDATE", "outbox_events")
 	defer func() { finishRepositoryOperation(span, err) }()
 
@@ -165,7 +156,7 @@ func (r *OutboxRepository) MarkOutboxPublishAttemptFailed(ctx context.Context, i
 }
 
 // ListPendingOutboxEvents возвращает ожидающие события outbox для повторной публикации
-func (r *OutboxRepository) ListPendingOutboxEvents(ctx context.Context, limit int) (events []outbox.Event, err error) {
+func (r *outboxRepository) ListPendingOutboxEvents(ctx context.Context, limit int) (events []outbox.Event, err error) {
 	ctx, span := r.telemetry.startRepositoryOperation(ctx, "SELECT", "outbox_events")
 	defer func() { finishRepositoryOperation(span, err) }()
 
@@ -195,7 +186,9 @@ func (r *OutboxRepository) ListPendingOutboxEvents(ctx context.Context, limit in
 		return nil, fmt.Errorf("list pending outbox events: %w", err)
 	}
 	defer func() {
-		_ = rows.Close()
+		if closeErr := rows.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("close pending outbox event rows: %w", closeErr))
+		}
 	}()
 
 	events = make([]outbox.Event, 0)

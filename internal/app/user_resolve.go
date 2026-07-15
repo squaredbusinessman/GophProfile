@@ -10,6 +10,7 @@ import (
 
 // UserEmailResolver описывает получение или создание пользователя по электронной почте
 type UserEmailResolver interface {
+	// FindOrCreateUserByEmail возвращает пользователя по email или создаёт нового.
 	FindOrCreateUserByEmail(ctx context.Context, email string, now time.Time) (user.User, error)
 }
 

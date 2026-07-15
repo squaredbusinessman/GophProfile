@@ -14,6 +14,7 @@ import (
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/squaredbusinessman/GophProfile/internal/config"
+	"github.com/squaredbusinessman/GophProfile/internal/resilience"
 )
 
 var (
@@ -23,6 +24,8 @@ var (
 	ErrInvalidKey = errors.New("invalid s3 object key")
 	// ErrInvalidConfig сообщает о недопустимой конфигурации S3
 	ErrInvalidConfig = errors.New("invalid s3 config")
+	// errOperationPanicked отмечает аварийное завершение запроса S3
+	errOperationPanicked = errors.New("s3 operation panicked")
 )
 
 // Client выполняет операции с объектами S3 и записывает их телеметрию
@@ -31,6 +34,7 @@ type Client struct {
 	region    string
 	api       objectStorageAPI
 	telemetry s3Telemetry
+	breaker   *resilience.CircuitBreaker
 }
 
 // ObjectMetadata содержит безопасные метаданные объекта S3
@@ -63,7 +67,7 @@ type minioAdapter struct {
 }
 
 // NewClient создаёт S3-совместимый клиент из конфигурации приложения
-func NewClient(cfg config.S3Config) (*Client, error) {
+func NewClient(cfg config.S3Config, breakerCfg ...resilience.CircuitBreakerConfig) (*Client, error) {
 	endpoint, secure, err := parseEndpoint(cfg.Endpoint)
 	if err != nil {
 		return nil, err
@@ -86,7 +90,7 @@ func NewClient(cfg config.S3Config) (*Client, error) {
 		return nil, fmt.Errorf("create s3 client: %w", err)
 	}
 
-	client, err := newClientWithRegion(cfg.Bucket, cfg.Region, &minioAdapter{sdk: sdk})
+	client, err := newClientWithRegion(cfg.Bucket, cfg.Region, &minioAdapter{sdk: sdk}, breakerCfg...)
 	if err != nil {
 		return nil, err
 	}
@@ -94,16 +98,21 @@ func NewClient(cfg config.S3Config) (*Client, error) {
 }
 
 // newClientWithRegion создаёт клиент S3 с явно заданным регионом
-func newClientWithRegion(bucket string, region string, api objectStorageAPI) (*Client, error) {
+func newClientWithRegion(bucket string, region string, api objectStorageAPI, breakerCfg ...resilience.CircuitBreakerConfig) (*Client, error) {
 	telemetry, err := newS3Telemetry()
 	if err != nil {
 		return nil, fmt.Errorf("create s3 telemetry: %w", err)
+	}
+	cfg := resilience.CircuitBreakerConfig{}
+	if len(breakerCfg) > 0 {
+		cfg = breakerCfg[0]
 	}
 	return &Client{
 		bucket:    bucket,
 		region:    region,
 		api:       api,
 		telemetry: telemetry,
+		breaker:   resilience.NewCircuitBreaker("s3", cfg),
 	}, nil
 }
 
@@ -114,7 +123,9 @@ func (c *Client) Put(ctx context.Context, key string, reader io.Reader, size int
 	}
 	ctx, operation := c.telemetry.startS3Operation(ctx, "Put", "PutObject", objectAttributes(size, contentType)...)
 
-	err := c.api.PutObject(ctx, c.bucket, key, reader, size, contentType)
+	err := c.callS3(func() error {
+		return c.api.PutObject(ctx, c.bucket, key, reader, size, contentType)
+	})
 	if err != nil {
 		operation.finish(s3ResultError, err)
 		return wrapError("put object", err)
@@ -150,7 +161,9 @@ func (c *Client) Delete(ctx context.Context, key string) error {
 	}
 
 	ctx, operation := c.telemetry.startS3Operation(ctx, "Delete", "DeleteObject")
-	err := c.api.RemoveObject(ctx, c.bucket, key)
+	err := c.callS3(func() error {
+		return c.api.RemoveObject(ctx, c.bucket, key)
+	})
 	if err != nil {
 		if isNotFound(err) {
 			operation.finish(s3ResultSuccess, nil)
@@ -171,7 +184,9 @@ func (c *Client) Exists(ctx context.Context, key string) (bool, error) {
 	}
 
 	ctx, operation := c.telemetry.startS3Operation(ctx, "Exists", "HeadObject")
-	metadata, err := c.api.StatObject(ctx, c.bucket, key)
+	metadata, err := callS3Value(c, func() (ObjectMetadata, error) {
+		return c.api.StatObject(ctx, c.bucket, key)
+	})
 	if err != nil {
 		if isNotFound(err) {
 			operation.finish(s3ResultNotFound, nil)
@@ -187,7 +202,9 @@ func (c *Client) Exists(ctx context.Context, key string) (bool, error) {
 
 // HealthCheck проверяет доступность bucket в S3-compatible хранилище
 func (c *Client) HealthCheck(ctx context.Context) error {
-	exists, err := c.api.BucketExists(ctx, c.bucket)
+	exists, err := callS3Value(c, func() (bool, error) {
+		return c.api.BucketExists(ctx, c.bucket)
+	})
 	if err != nil {
 		return wrapError("check bucket", err)
 	}
@@ -208,7 +225,9 @@ func (c *Client) EnsureBucket(ctx context.Context) (resultErr error) {
 		}
 	}()
 
-	exists, err := c.api.BucketExists(ctx, c.bucket)
+	exists, err := callS3Value(c, func() (bool, error) {
+		return c.api.BucketExists(ctx, c.bucket)
+	})
 	if err != nil {
 		return wrapError("check bucket", err)
 	}
@@ -216,8 +235,12 @@ func (c *Client) EnsureBucket(ctx context.Context) (resultErr error) {
 		return nil
 	}
 
-	if err := c.api.MakeBucket(ctx, c.bucket, c.region); err != nil {
-		exists, checkErr := c.api.BucketExists(ctx, c.bucket)
+	if err := c.callS3(func() error {
+		return c.api.MakeBucket(ctx, c.bucket, c.region)
+	}); err != nil {
+		exists, checkErr := callS3Value(c, func() (bool, error) {
+			return c.api.BucketExists(ctx, c.bucket)
+		})
 		if checkErr == nil && exists {
 			return nil
 		}
@@ -229,7 +252,9 @@ func (c *Client) EnsureBucket(ctx context.Context) (resultErr error) {
 // statObject получает metadata и измеряет HeadObject отдельно от GetObject
 func (c *Client) statObject(ctx context.Context, key string) (ObjectMetadata, error) {
 	ctx, operation := c.telemetry.startS3Operation(ctx, "Stat", "HeadObject")
-	metadata, err := c.api.StatObject(ctx, c.bucket, key)
+	metadata, err := callS3Value(c, func() (ObjectMetadata, error) {
+		return c.api.StatObject(ctx, c.bucket, key)
+	})
 	if err != nil {
 		if isNotFound(err) {
 			operation.finish(s3ResultNotFound, nil)
@@ -245,7 +270,9 @@ func (c *Client) statObject(ctx context.Context, key string) (ObjectMetadata, er
 // getObject открывает поток объекта без дополнительного чтения body
 func (c *Client) getObject(ctx context.Context, key string, metadata ObjectMetadata) (io.ReadCloser, error) {
 	ctx, operation := c.telemetry.startS3Operation(ctx, "Get", "GetObject", objectAttributes(metadata.Size, metadata.ContentType)...)
-	object, err := c.api.GetObject(ctx, c.bucket, key)
+	object, err := callS3Value(c, func() (io.ReadCloser, error) {
+		return c.api.GetObject(ctx, c.bucket, key)
+	})
 	if err != nil {
 		if isNotFound(err) {
 			operation.finish(s3ResultNotFound, nil)
@@ -260,6 +287,36 @@ func (c *Client) getObject(ctx context.Context, key string, metadata ObjectMetad
 // Bucket возвращает имя bucket хранилища
 func (c *Client) Bucket() string {
 	return c.bucket
+}
+
+// callS3 выполняет S3-запрос через автоматический выключатель и не считает 404 отказом зависимости
+func (c *Client) callS3(operation func() error) error {
+	_, err := callS3Value(c, func() (struct{}, error) {
+		return struct{}{}, operation()
+	})
+	return err
+}
+
+// callS3Value выполняет возвращающую значение S3-операцию через автоматический выключатель
+func callS3Value[T any](client *Client, operation func() (T, error)) (result T, err error) {
+	done, err := client.breaker.Allow()
+	if err != nil {
+		return result, err
+	}
+	defer func() {
+		panicValue := recover()
+		if panicValue != nil {
+			done(errOperationPanicked)
+			panic(panicValue)
+		}
+		if isNotFound(err) {
+			done(nil)
+			return
+		}
+		done(err)
+	}()
+
+	return operation()
 }
 
 // PutObject сохраняет объект через MinIO SDK
@@ -333,7 +390,7 @@ func parseEndpoint(rawEndpoint string) (string, bool, error) {
 
 	parsed, err := url.Parse(rawEndpoint)
 	if err != nil {
-		return "", false, fmt.Errorf("%w: endpoint parse error: %v", ErrInvalidConfig, err)
+		return "", false, fmt.Errorf("%w: endpoint parse error: %w", ErrInvalidConfig, err)
 	}
 
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {

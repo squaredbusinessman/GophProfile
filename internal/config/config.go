@@ -40,6 +40,8 @@ type Config struct {
 	Worker WorkerConfig
 	// Vault содержит настройки защищённого хранилища секретов
 	Vault VaultConfig
+	// CircuitBreaker содержит настройки защиты внешних зависимостей
+	CircuitBreaker CircuitBreakerConfig
 }
 
 // ObservabilityConfig содержит настройки трассировки, метрик и логирования
@@ -142,6 +144,16 @@ type VaultConfig struct {
 	Enabled bool
 	// Timeout ограничивает запрос к Vault
 	Timeout time.Duration
+}
+
+// CircuitBreakerConfig содержит настройки circuit breaker для внешних зависимостей
+type CircuitBreakerConfig struct {
+	// Enabled включает circuit breaker
+	Enabled bool
+	// FailureThreshold задаёт число последовательных ошибок перед открытием
+	FailureThreshold int
+	// OpenTimeout задаёт время до пробного запроса после открытия
+	OpenTimeout time.Duration
 }
 
 // ApplySecrets применяет секреты из защищенного хранилища к конфигурации
@@ -250,6 +262,11 @@ func load(process string) Config {
 			ServicePath: envString("VAULT_SERVICE_PATH", "gophprofile"),
 			Enabled:     envBool("VAULT_ENABLED", false),
 			Timeout:     envDuration("VAULT_TIMEOUT", 5*time.Second),
+		},
+		CircuitBreaker: CircuitBreakerConfig{
+			Enabled:          envBool("CIRCUIT_BREAKER_ENABLED", true),
+			FailureThreshold: envInt("CIRCUIT_BREAKER_FAILURE_THRESHOLD", 5),
+			OpenTimeout:      envDuration("CIRCUIT_BREAKER_OPEN_TIMEOUT", 30*time.Second),
 		},
 	}
 }

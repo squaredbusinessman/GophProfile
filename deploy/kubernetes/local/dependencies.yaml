@@ -1,0 +1,534 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gophprofile
+  labels:
+    app.kubernetes.io/part-of: gophprofile-local
+---
+# Секрет предназначен только для локального кластера Rancher Desktop
+apiVersion: v1
+kind: Secret
+metadata:
+  name: gophprofile-local-secrets
+  namespace: gophprofile
+  labels:
+    app.kubernetes.io/part-of: gophprofile-local
+type: Opaque
+stringData:
+  POSTGRES_DB: gophprofile
+  POSTGRES_USER: gophprofile
+  POSTGRES_PASSWORD: gophprofile
+  DATABASE_URL: postgres://gophprofile:gophprofile@gophprofile-postgres:5432/gophprofile?sslmode=disable
+  MINIO_ROOT_USER: minioadmin
+  MINIO_ROOT_PASSWORD: minioadmin
+  S3_ACCESS_KEY: minioadmin
+  S3_SECRET_KEY: minioadmin
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: gophprofile-postgres-data
+  namespace: gophprofile
+  labels:
+    app.kubernetes.io/part-of: gophprofile-local
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gophprofile-postgres
+  namespace: gophprofile
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/part-of: gophprofile-local
+spec:
+  selector:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/part-of: gophprofile-local
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gophprofile-postgres
+  namespace: gophprofile
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/part-of: gophprofile-local
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+      app.kubernetes.io/part-of: gophprofile-local
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres
+        app.kubernetes.io/part-of: gophprofile-local
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: gophprofile-local-secrets
+                  key: POSTGRES_DB
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: gophprofile-local-secrets
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: gophprofile-local-secrets
+                  key: POSTGRES_PASSWORD
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -ec
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 30
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -ec
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: gophprofile-postgres-data
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: gophprofile-kafka-data
+  namespace: gophprofile
+  labels:
+    app.kubernetes.io/part-of: gophprofile-local
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gophprofile-kafka
+  namespace: gophprofile
+  labels:
+    app.kubernetes.io/name: kafka
+    app.kubernetes.io/part-of: gophprofile-local
+spec:
+  publishNotReadyAddresses: true
+  selector:
+    app.kubernetes.io/name: kafka
+    app.kubernetes.io/part-of: gophprofile-local
+  ports:
+    - name: kafka
+      port: 9092
+      targetPort: kafka
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gophprofile-kafka
+  namespace: gophprofile
+  labels:
+    app.kubernetes.io/name: kafka
+    app.kubernetes.io/part-of: gophprofile-local
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kafka
+      app.kubernetes.io/part-of: gophprofile-local
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kafka
+        app.kubernetes.io/part-of: gophprofile-local
+    spec:
+      securityContext:
+        fsGroup: 1000
+      containers:
+        - name: kafka
+          image: apache/kafka:4.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: kafka
+              containerPort: 9092
+            - name: controller
+              containerPort: 9093
+          env:
+            - name: CLUSTER_ID
+              value: MkU3OEVBNTcwNTJENDM2Qk
+            - name: KAFKA_NODE_ID
+              value: "1"
+            - name: KAFKA_PROCESS_ROLES
+              value: broker,controller
+            - name: KAFKA_CONTROLLER_QUORUM_VOTERS
+              value: 1@localhost:9093
+            - name: KAFKA_LISTENERS
+              value: PLAINTEXT://:9092,CONTROLLER://:9093
+            - name: KAFKA_ADVERTISED_LISTENERS
+              value: PLAINTEXT://gophprofile-kafka.gophprofile.svc.cluster.local:9092
+            - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
+              value: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+            - name: KAFKA_CONTROLLER_LISTENER_NAMES
+              value: CONTROLLER
+            - name: KAFKA_AUTO_CREATE_TOPICS_ENABLE
+              value: "true"
+            - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
+              value: "1"
+            - name: KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS
+              value: "0"
+            - name: KAFKA_LOG_DIRS
+              value: /var/lib/kafka/data
+          readinessProbe:
+            exec:
+              command:
+                - timeout
+                - 10s
+                - /opt/kafka/bin/kafka-broker-api-versions.sh
+                - --bootstrap-server
+                - gophprofile-kafka:9092
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 12
+            failureThreshold: 60
+          startupProbe:
+            tcpSocket:
+              port: kafka
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 120
+          livenessProbe:
+            tcpSocket:
+              port: kafka
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 100m
+              memory: 384Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/kafka/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: gophprofile-kafka-data
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: gophprofile-minio-data
+  namespace: gophprofile
+  labels:
+    app.kubernetes.io/part-of: gophprofile-local
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gophprofile-minio
+  namespace: gophprofile
+  labels:
+    app.kubernetes.io/name: minio
+    app.kubernetes.io/part-of: gophprofile-local
+spec:
+  selector:
+    app.kubernetes.io/name: minio
+    app.kubernetes.io/part-of: gophprofile-local
+  ports:
+    - name: api
+      port: 9000
+      targetPort: api
+    - name: console
+      port: 9001
+      targetPort: console
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gophprofile-minio
+  namespace: gophprofile
+  labels:
+    app.kubernetes.io/name: minio
+    app.kubernetes.io/part-of: gophprofile-local
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: minio
+      app.kubernetes.io/part-of: gophprofile-local
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: minio
+        app.kubernetes.io/part-of: gophprofile-local
+    spec:
+      containers:
+        - name: minio
+          image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+          imagePullPolicy: IfNotPresent
+          args:
+            - server
+            - /data
+            - --console-address
+            - :9001
+          ports:
+            - name: api
+              containerPort: 9000
+            - name: console
+              containerPort: 9001
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: gophprofile-local-secrets
+                  key: MINIO_ROOT_USER
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: gophprofile-local-secrets
+                  key: MINIO_ROOT_PASSWORD
+          readinessProbe:
+            httpGet:
+              path: /minio/health/ready
+              port: api
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /minio/health/live
+              port: api
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: gophprofile-minio-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gophprofile-frontend
+  namespace: gophprofile
+  labels:
+    app.kubernetes.io/name: frontend
+    app.kubernetes.io/part-of: gophprofile-local
+spec:
+  selector:
+    app.kubernetes.io/name: frontend
+    app.kubernetes.io/part-of: gophprofile-local
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gophprofile-frontend
+  namespace: gophprofile
+  labels:
+    app.kubernetes.io/name: frontend
+    app.kubernetes.io/part-of: gophprofile-local
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: frontend
+      app.kubernetes.io/part-of: gophprofile-local
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: frontend
+        app.kubernetes.io/part-of: gophprofile-local
+    spec:
+      containers:
+        - name: frontend
+          image: gophprofile-frontend:local
+          imagePullPolicy: Never
+          ports:
+            - name: http
+              containerPort: 80
+          env:
+            - name: API_BACKEND
+              value: http://gophprofile-server.gophprofile.svc.cluster.local:80
+            - name: NGINX_RESOLVER
+              value: 10.43.0.10
+            - name: NGINX_ENVSUBST_FILTER
+              value: API_BACKEND|NGINX_RESOLVER
+          readinessProbe:
+            httpGet:
+              path: /web/
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /web/
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gophprofile-jaeger
+  namespace: gophprofile
+  labels:
+    app.kubernetes.io/name: jaeger
+    app.kubernetes.io/part-of: gophprofile-local
+spec:
+  selector:
+    app.kubernetes.io/name: jaeger
+    app.kubernetes.io/part-of: gophprofile-local
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: otlp-grpc
+    - name: otlp-http
+      port: 4318
+      targetPort: otlp-http
+    - name: ui
+      port: 16686
+      targetPort: ui
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gophprofile-jaeger
+  namespace: gophprofile
+  labels:
+    app.kubernetes.io/name: jaeger
+    app.kubernetes.io/part-of: gophprofile-local
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: jaeger
+      app.kubernetes.io/part-of: gophprofile-local
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: jaeger
+        app.kubernetes.io/part-of: gophprofile-local
+    spec:
+      containers:
+        - name: jaeger
+          image: jaegertracing/jaeger:2.18.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: COLLECTOR_OTLP_ENABLED
+              value: "true"
+          ports:
+            - name: otlp-grpc
+              containerPort: 4317
+            - name: otlp-http
+              containerPort: 4318
+            - name: ui
+              containerPort: 16686
+          readinessProbe:
+            httpGet:
+              path: /
+              port: ui
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /
+              port: ui
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi

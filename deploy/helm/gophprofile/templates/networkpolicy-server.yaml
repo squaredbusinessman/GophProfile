@@ -1,0 +1,42 @@
+{{- if and .Values.networkPolicy.enabled .Values.server.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "gophprofile.fullname" . }}-server-netpol
+  labels:
+    {{- include "gophprofile.labels" . | nindent 4 }}
+    app.kubernetes.io/component: server
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "gophprofile.componentSelectorLabels" (dict "Chart" .Chart "Release" .Release "Values" .Values "component" "server") | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            {{- toYaml .Values.networkPolicy.ingress.ingressController.namespaceSelector | nindent 12 }}
+          {{- with .Values.networkPolicy.ingress.ingressController.podSelector }}
+          podSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      ports:
+        - protocol: TCP
+          port: http
+    - from:
+        - namespaceSelector:
+            {{- toYaml .Values.networkPolicy.ingress.monitoring.namespaceSelector | nindent 12 }}
+          {{- with .Values.networkPolicy.ingress.monitoring.podSelector }}
+          podSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      ports:
+        - protocol: TCP
+          port: metrics
+    {{- with .Values.networkPolicy.ingress.serverAdditional }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  egress:
+    {{- toYaml .Values.networkPolicy.egress | nindent 4 }}
+{{- end }}
